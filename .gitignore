@@ -6,5 +6,6 @@
 !*/makefile
 !*/*.md
 
+.idea
 !.gitignore
 !*.md

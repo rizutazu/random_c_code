@@ -1,9 +1,9 @@
 CC := gcc
 
-test_flags := -Dtest5 -Dtest1 -Dtest2 -Dtest3 -Dtest4 
+test_flags := -Dtest5 -Dtest1 -Dtest2 -Dtest3 -Dtest4
 debug_flag := -Dm_malloc_debug
 
-flags := ${debug_flag} ${test_flags}
+flags := ${debug_flag} ${test_flags} -std=gnu11
 
 .PHONY: main clean test64 test32
 
@@ -20,3 +20,5 @@ test64:
 test32:
 	${CC} -m32 -o test32 m_malloc.c tests.c ${flags}
 	./test32
+
+all: main test32 test64

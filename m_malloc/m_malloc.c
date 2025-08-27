@@ -1,6 +1,5 @@
 #include "m_malloc.h"
 #include <stdint.h>
-#include <string.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <assert.h>
@@ -106,6 +105,9 @@ static void insertChunk(ChunkHeader_t **bucket, ChunkHeader_t *new) {
         curr = curr->next;
     }
 
+    printf("bug: insertChunk goes out of loop\n");
+    return;
+
 merge_middle:
     
     // after the new is merged into curr/next, check whether 
@@ -146,7 +148,6 @@ merge_last:
         curr->next = new;
         new->next = NULL;
     }
-    return;
     
 }
 
@@ -173,7 +174,7 @@ static ChunkHeader_t *moreCore(size_t n) {
         chunk->size = n;
 
         #ifdef m_malloc_debug
-        printf("moreCore: %p [%d]\n", chunk, n);
+        printf("moreCore: %p [%lu]\n", chunk, n);
         #endif
 
         // update upper bound
@@ -206,11 +207,9 @@ static void lessCore(ChunkHeader_t **bucket) {
         ) {
 
             #ifdef m_malloc_debug
-            printf("lessCore: chunk condition match %p --> %p [%d]\n", curr, (size_t)curr + curr->size, curr->size);
+            printf("lessCore: chunk condition match %p --> %p [%lu]\n", curr, (void *)((size_t)curr + curr->size), curr->size);
             nothing = 0;
             #endif
-
-            ChunkHeader_t *temp;
 
             // optimization?: if unmap size is too big (e.g. single huge free chunk), only free half
             size_t give_back_size = rounded_size;
@@ -228,14 +227,14 @@ static void lessCore(ChunkHeader_t **bucket) {
                     *bucket = curr->next;
                 }
 
-                temp = curr->next;
+                ChunkHeader_t *temp = curr->next;
 
                 #ifdef m_malloc_debug
-                printf("lessCore: %p [%d]\n", curr, give_back_size);
+                printf("lessCore: %p [%lu]\n", curr, give_back_size);
                 #endif
 
                 if (munmap(curr, give_back_size)) {
-                    printf("munmap: %p [%d] failed\n", curr, give_back_size);
+                    printf("munmap: %p [%lu] failed\n", curr, give_back_size);
                 }
 
                 // curr++, prev unchanged
@@ -253,11 +252,11 @@ static void lessCore(ChunkHeader_t **bucket) {
                 }
 
                 #ifdef m_malloc_debug
-                printf("lessCore: %p [%d]\n", curr, give_back_size);
+                printf("lessCore: %p [%lu]\n", curr, give_back_size);
                 #endif
 
                 if (munmap(curr, give_back_size)) {
-                    printf("munmap: %p [%d] failed\n", curr, give_back_size);
+                    printf("munmap: %p [%lu] failed\n", curr, give_back_size);
                 }
 
                 // curr++, prev++
@@ -336,7 +335,7 @@ static void printBucket(ChunkHeader_t **bucket) {
     }
     printf("  = bucket =\n");
     while (curr) {
-        printf("    %p --> %p [%d]\n", curr, (size_t)curr + curr->size, curr->size);
+        printf("    %p --> %p [%lu]\n", curr, (void *)((size_t)curr + curr->size), curr->size);
         curr = curr->next;
     }
     printf("  = End bucket =\n");
@@ -350,14 +349,14 @@ void *m_malloc(size_t n_user) {
         n_user = userSizeRoundUp(n_user);
     }
 
-    // n_user is user requested memory size, it does not equals to n, which defined as chunk size
+    // n_user is user requested memory size, it does not equal to n, which defined as chunk size
     // because of chunk header size  
     size_t n = n_user + offsetof(ChunkHeader_t, next);
 
     ChunkHeader_t *c;
     
     #ifdef m_malloc_debug
-    printf("\n==> Start malloc user req %d\n", n_user);
+    printf("\n==> Start malloc user req %lu\n", n_user);
     printf("before find first fit: \n");
     printBucket(&bucket);
     #endif
@@ -366,13 +365,13 @@ void *m_malloc(size_t n_user) {
     if (!c) {
 
         #ifdef m_malloc_debug
-        printf("no first fit, morecore(%d)\n", n);
+        printf("no first fit, moreCore(%lu)\n", n);
         #endif
 
         insertChunk(&bucket, moreCore(n));
 
         #ifdef m_malloc_debug
-        printf("after add morecore:\n");
+        printf("after add moreCore:\n");
         printBucket(&bucket);
         #endif
 
@@ -383,7 +382,7 @@ void *m_malloc(size_t n_user) {
     if (c) {
 
         #ifdef m_malloc_debug
-        printf("take first fit: %p -> %p [%d]\n", c, (size_t)c + c->size, c->size);
+        printf("take first fit: %p -> %p [%lu]\n", c, (void *)((size_t)c + c->size), c->size);
         printf("after take first fit:\n");
         printBucket(&bucket);
         #endif
@@ -414,7 +413,7 @@ void m_free(void *ptr) {
         c->size = c->size & (~CHUNK_ALLOCATED);
 
         #ifdef m_malloc_debug
-        printf("insert chunk: %p -> %p [%d]\n", c, (size_t)c + c->size, c->size);
+        printf("insert chunk: %p -> %p [%lu]\n", c, (void *)((size_t)c + c->size), c->size);
         printf("before insert\n");
         printBucket(&bucket);
         #endif
