@@ -57,6 +57,10 @@ static void *upperBound;
 // insert a new chunk into memory chunk list
 // the size field must not contain CHUNK_ALLOCATED bit 
 static void insertChunk(ChunkHeader_t **bucket, ChunkHeader_t *new) {
+
+    if (!new) {
+        return;
+    }
     ChunkHeader_t *curr, *next;
 
     next = *bucket;
@@ -182,7 +186,8 @@ static ChunkHeader_t *moreCore(size_t n) {
         if (u > (size_t)upperBound) {
             upperBound = (void *)u;
         }
-        
+    } else {
+        printf("moreCore: warning: got NULL ptr\n");
     }
     return chunk;
 }
