@@ -46,6 +46,7 @@ typedef struct ChunkHeader_t {
 // make sure chunk header alignment
 static_assert(sizeof(ChunkHeader_t) == MIN_CHUNK_SIZE);
 static_assert(offsetof(ChunkHeader_t, next) == sizeof(size_t));
+static_assert(MIN_USER_SIZE == MIN_CHUNK_SIZE - offsetof(ChunkHeader_t, next));
 
 // free memory chunks, a linked list
 // the bucket is always sorted by address
@@ -186,6 +187,8 @@ static ChunkHeader_t *moreCore(size_t n) {
 }
 
 // give back memory to system
+// this implementation may be buggy, as a chunk is freed iff its address is page aligned, so there
+// is a chance of exhausting memory
 static void lessCore(ChunkHeader_t **bucket) {
     ChunkHeader_t *curr,*prev = NULL;
 
