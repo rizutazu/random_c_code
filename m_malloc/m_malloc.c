@@ -9,10 +9,10 @@
 // #define m_malloc_debug
 
 // minimal memory chunk size
-#define MIN_CHUNK_SIZE 16
+#define MIN_CHUNK_SIZE (sizeof(size_t) + sizeof(uintptr_t))
 
 // minimal size available to user, and the alignment 
-#define MIN_USER_SIZE 8
+#define MIN_USER_SIZE (sizeof(uintptr_t))
 
 // roundup 
 #define userSizeRoundUp(x) ( (x + MIN_USER_SIZE - 1) & ~(MIN_USER_SIZE - 1) )
@@ -46,7 +46,7 @@ typedef struct ChunkHeader_t {
 // make sure chunk header alignment
 static_assert(sizeof(ChunkHeader_t) == MIN_CHUNK_SIZE);
 static_assert(offsetof(ChunkHeader_t, next) == sizeof(size_t));
-static_assert(MIN_USER_SIZE == MIN_CHUNK_SIZE - offsetof(ChunkHeader_t, next));
+static_assert(sizeof(uintptr_t) == sizeof(size_t));
 
 // free memory chunks, a linked list
 // the bucket is always sorted by address
@@ -357,7 +357,7 @@ void *m_malloc(size_t n_user) {
     ChunkHeader_t *c;
     
     #ifdef m_malloc_debug
-    printf("==> Start malloc user req %d\n", n_user);
+    printf("\n==> Start malloc user req %d\n", n_user);
     printf("before find first fit: \n");
     printBucket(&bucket);
     #endif
@@ -406,7 +406,7 @@ void m_free(void *ptr) {
     }
 
     #ifdef m_malloc_debug
-    printf("==> Start free user ptr %p\n", ptr);
+    printf("\n==> Start free user ptr %p\n", ptr);
     #endif
 
     ChunkHeader_t *c = (ChunkHeader_t *)(ptr - offsetof(ChunkHeader_t, next));

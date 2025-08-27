@@ -1,8 +1,9 @@
 # `m_malloc`: simple malloc implementation
 
 ## Notice
-- 64 bit environment
+- Page size is assumed to be 4096
 - Not thread safe
+- The implementation itself might be buggy since I haven't found good test code
 
 ## Ideas
 - Use `mmap` to grab a bunch of memory from system.
