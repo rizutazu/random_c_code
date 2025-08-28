@@ -77,7 +77,7 @@ static void insertChunk(ChunkHeader_t **bucket, ChunkHeader_t *new) {
     // list is not empty: check if insert before first element
     if (new < next) {
         // continuous, merge
-        if ((size_t)new + new->size == (size_t)next) {
+        if ((void *)new + new->size == (void *)next) {
             new->next = next->next;
             new->size += next->size;
             *bucket = new;
@@ -102,8 +102,8 @@ static void insertChunk(ChunkHeader_t **bucket, ChunkHeader_t *new) {
 
         // [x x | x ...]
         // next is not NULL: check whether merge curr or next
-        if ((size_t)curr < (size_t)new 
-                && (size_t)new < (size_t)next) {
+        if ((void *)curr < (void *)new
+                && (void *)new < (void *)next) {
             goto merge_middle;
         }
         curr = curr->next;
@@ -119,11 +119,11 @@ merge_middle:
     int check_curr_next = 1;
 
     // merge curr 
-    if ((size_t)curr + curr->size == (size_t)new) {
+    if ((void *)curr + curr->size == (void *)new) {
         curr->size += new->size;
 
     // merge next
-    } else if ((size_t)new + new->size == (size_t)next) {
+    } else if ((void *)new + new->size == (void *)next) {
         new->next = next->next;
         new->size += next->size;
         curr->next = new;
@@ -136,7 +136,7 @@ merge_middle:
     }
 
     if (check_curr_next) {
-        if ((size_t)curr + curr->size == (size_t)next) {
+        if ((void *)curr + curr->size == (void *)next) {
             curr->next = next->next;
             curr->size += next->size;
         }
@@ -146,7 +146,7 @@ merge_middle:
 merge_last:
     // merge into curr
     // curr + curr.size == new: continuous memory, merge
-    if ((size_t)curr + curr->size == (size_t)new) {
+    if ((void *)curr + curr->size == (void *)new) {
         curr->size += new->size;
     } else {    // not continuous: add to linked list
         curr->next = new;
@@ -182,9 +182,9 @@ static ChunkHeader_t *moreCore(size_t n) {
 #endif
 
         // update upper bound
-        size_t u = (size_t)chunk + chunk->size;
-        if (u > (size_t)upperBound) {
-            upperBound = (void *)u;
+        void *u = (void *)chunk + chunk->size;
+        if (u > upperBound) {
+            upperBound = u;
         }
     } else {
         printf("moreCore: warning: got NULL ptr\n");
@@ -205,8 +205,8 @@ static void lessCore(ChunkHeader_t **bucket) {
     while (curr) {
 
         // page-aligned address boundary
-        size_t palign_low = pageSizeRoundUp((size_t)curr);
-        size_t palign_high = pageSizeRoundDown((size_t)curr + curr->size);
+        size_t palign_low = pageSizeRoundUp((uintptr_t)curr);
+        size_t palign_high = pageSizeRoundDown((uintptr_t)((void *)curr + curr->size));
 
         // page-aligned size
         size_t palign_size = palign_high - palign_low;
@@ -215,7 +215,7 @@ static void lessCore(ChunkHeader_t **bucket) {
         if (palign_size) {
 
 #ifdef m_malloc_debug
-            printf("lessCore: chunk condition might match %p --> %p [%lu]\n", curr, (void *)((size_t)curr + curr->size), curr->size);
+            printf("lessCore: chunk condition might match %p --> %p [%lu]\n", curr, (void *)curr + curr->size, curr->size);
             nothing = 0;
 #endif
 
@@ -228,7 +228,7 @@ static void lessCore(ChunkHeader_t **bucket) {
             }
 
             // the free chunk is perfectly page-aligned
-            if (isPageAligned((size_t)curr) && isPageAligned((size_t)curr + curr->size)) {
+            if (isPageAligned((uintptr_t)curr) && isPageAligned((uintptr_t)((void *)curr + curr->size))) {
 
                 if (give_back_size == palign_size) {
                     goto give_back_whole;
@@ -240,7 +240,7 @@ static void lessCore(ChunkHeader_t **bucket) {
             }
 
             // only start address is aligned
-            if (isPageAligned((size_t)curr)) {
+            if (isPageAligned((uintptr_t)curr)) {
 
                 // after give back, the remaining size must greater than MIN_CHUNK_SIZE
                 if (curr->size - give_back_size >= MIN_CHUNK_SIZE) {
@@ -260,7 +260,7 @@ static void lessCore(ChunkHeader_t **bucket) {
             }
 
             // only end address is aligned
-            if (isPageAligned((size_t)curr + curr->size)) {
+            if (isPageAligned((uintptr_t)((void *)curr + curr->size))) {
 
                 if (curr->size - give_back_size >= MIN_CHUNK_SIZE) {
                     goto give_back_last_half;;
@@ -309,7 +309,7 @@ give_back_whole:
 
 give_back_first_half:
             {
-                ChunkHeader_t *newCurr = (ChunkHeader_t *)((size_t)curr + give_back_size);
+                ChunkHeader_t *newCurr = (ChunkHeader_t *)((void *)curr + give_back_size);
                 newCurr->size = curr->size - give_back_size;
                 newCurr->next = curr->next;
 
@@ -336,7 +336,7 @@ give_back_first_half:
 
 give_back_last_half:
             {
-                ChunkHeader_t *free = (ChunkHeader_t *)((size_t)curr + (curr->size - give_back_size));
+                ChunkHeader_t *free = (ChunkHeader_t *)((void *)curr + (curr->size - give_back_size));
                 curr->size -= give_back_size;
 
 #ifdef m_malloc_debug
@@ -395,7 +395,7 @@ static ChunkHeader_t *findFirstFit(ChunkHeader_t **bucket, size_t n) {
             // split the chunk
             } else {
                 // first half is the part that returns
-                ChunkHeader_t *newCurr = (ChunkHeader_t *)((size_t)curr + n);
+                ChunkHeader_t *newCurr = (ChunkHeader_t *)((void *)curr + n);
                 newCurr->size = curr->size - n;
                 newCurr->next = curr->next;
                 if (prev) {
@@ -425,7 +425,7 @@ static void printBucket(ChunkHeader_t **bucket) {
     }
     printf("  = bucket =\n");
     while (curr) {
-        printf("    %p --> %p [%lu]\n", curr, (void *)((size_t)curr + curr->size), curr->size);
+        printf("    %p --> %p [%lu]\n", curr, (void *)curr + curr->size, curr->size);
         curr = curr->next;
     }
     printf("  = End bucket =\n");
@@ -472,7 +472,7 @@ void *m_malloc(size_t n_user) {
     if (c) {
 
 #ifdef m_malloc_debug
-        printf("take first fit: %p -> %p [%lu]\n", c, (void *)((size_t)c + c->size), c->size);
+        printf("take first fit: %p -> %p [%lu]\n", c, (void *)c + c->size, c->size);
         printf("after take first fit:\n");
         printBucket(&bucket);
 #endif
@@ -503,7 +503,7 @@ void m_free(void *ptr) {
         c->size = c->size & (~CHUNK_ALLOCATED);
 
 #ifdef m_malloc_debug
-        printf("insert chunk: %p -> %p [%lu]\n", c, (void *)((size_t)c + c->size), c->size);
+        printf("insert chunk: %p -> %p [%lu]\n", c, (void *)c + c->size, c->size);
         printf("before insert\n");
         printBucket(&bucket);
 #endif
