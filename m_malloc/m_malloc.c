@@ -34,7 +34,7 @@
 // chunk header 
 typedef struct ChunkHeader_t {
     // the size of this chunk
-    // since chunk size alignment, the last 3 bits are not used for size, instead, for indicating allocation status
+    // since chunk size alignment, lower bits are not used for size, instead, for indicating allocation status
     // if chunk is allocated, the CHUNK_ALLOCATED bit is set
     size_t size;
     
@@ -177,9 +177,9 @@ static ChunkHeader_t *moreCore(size_t n) {
         chunk->next = NULL;
         chunk->size = n;
 
-        #ifdef m_malloc_debug
+#ifdef m_malloc_debug
         printf("moreCore: %p [%lu]\n", chunk, n);
-        #endif
+#endif
 
         // update upper bound
         size_t u = (size_t)chunk + chunk->size;
@@ -193,72 +193,135 @@ static ChunkHeader_t *moreCore(size_t n) {
 }
 
 // give back memory to system
-// this implementation may be buggy, as a chunk is freed iff its address is page aligned, so there
-// is a chance of exhausting memory
+// this implementation may be buggy, as a chunk is freed iff at least one of its address boundary is page-aligned
 static void lessCore(ChunkHeader_t **bucket) {
     ChunkHeader_t *curr,*prev = NULL;
 
-    #ifdef m_malloc_debug
+#ifdef m_malloc_debug
     int nothing = 1;
-    #endif
+#endif
     
     curr = *bucket;
     while (curr) {
 
-        // start address is aligned && chunk can be split, or chunk is page-aligned size
-        size_t rounded_size = pageSizeRoundDown(curr->size);
-        if (isPageAligned((size_t)curr) 
-                && ((curr->size >= rounded_size + MIN_CHUNK_SIZE) || curr->size == rounded_size)
-        ) {
+        // page-aligned address boundary
+        size_t palign_low = pageSizeRoundUp((size_t)curr);
+        size_t palign_high = pageSizeRoundDown((size_t)curr + curr->size);
 
-            #ifdef m_malloc_debug
-            printf("lessCore: chunk condition match %p --> %p [%lu]\n", curr, (void *)((size_t)curr + curr->size), curr->size);
+        // page-aligned size
+        size_t palign_size = palign_high - palign_low;
+
+        // can shrink at least 1 page-size memory
+        if (palign_size) {
+
+#ifdef m_malloc_debug
+            printf("lessCore: chunk condition might match %p --> %p [%lu]\n", curr, (void *)((size_t)curr + curr->size), curr->size);
             nothing = 0;
-            #endif
+#endif
 
-            // optimization?: if unmap size is too big (e.g. single huge free chunk), only free half
-            size_t give_back_size = rounded_size;
+            size_t give_back_size = palign_size;
+
+            // check whether give back size is too big (i.e, a huge chunk)
+            // if so, only give back half
             if (give_back_size >= FREE_SIZE_THRESHOLD) {
                 give_back_size = pageSizeRoundDown(give_back_size / 2);
             }
-                 
-            // page size align: give back the whole chunk
-            if (give_back_size == curr->size) {
-                
-                // update bucket
-                if (prev) {
-                    prev->next = curr->next;
+
+            // the free chunk is perfectly page-aligned
+            if (isPageAligned((size_t)curr) && isPageAligned((size_t)curr + curr->size)) {
+
+                if (give_back_size == palign_size) {
+                    goto give_back_whole;
+
+                // case of which the chunk is too big
                 } else {
-                    *bucket = curr->next;
+                    goto give_back_first_half;
+                }
+            }
+
+            // only start address is aligned
+            if (isPageAligned((size_t)curr)) {
+
+                // after give back, the remaining size must greater than MIN_CHUNK_SIZE
+                if (curr->size - give_back_size >= MIN_CHUNK_SIZE) {
+                    goto give_back_first_half;
                 }
 
-                ChunkHeader_t *temp = curr->next;
-
-                #ifdef m_malloc_debug
-                printf("lessCore: %p [%lu]\n", curr, give_back_size);
-                #endif
-
-                if (munmap(curr, give_back_size)) {
-                    printf("munmap: %p [%lu] failed\n", curr, give_back_size);
+                // or, if we can give back less 1 page to obey the restriction
+                if (give_back_size > PAGE_SIZE) {
+                    give_back_size -= PAGE_SIZE;
+                    goto give_back_first_half;
                 }
 
-                // curr++, prev unchanged
-                curr = temp;
+                // failed
+                prev = curr;
+                curr = curr->next;
+                continue;
+            }
 
-            // not align: split and give back
-            } else {
-                ChunkHeader_t *newCurr = (ChunkHeader_t *)((size_t)curr + give_back_size);
-                newCurr->size = curr->size - give_back_size;
-                newCurr->next = curr->next;
+            // only end address is aligned
+            if (isPageAligned((size_t)curr + curr->size)) {
+
+                if (curr->size - give_back_size >= MIN_CHUNK_SIZE) {
+                    goto give_back_last_half;;
+                }
+
+                if (give_back_size > PAGE_SIZE) {
+                    give_back_size -= PAGE_SIZE;
+                    goto give_back_last_half;;
+                }
+
+                // failed
+                prev = curr;
+                curr = curr->next;
+                continue;
+            }
+
+            // nothing aligned
+            // todo:
+            prev = curr;
+            curr = curr->next;
+            continue;
+
+
+give_back_whole:
+            {
+                ChunkHeader_t *newCurr = curr->next;
+
+                // update bucket
                 if (prev) {
                     prev->next = newCurr;
                 } else {
                     *bucket = newCurr;
                 }
 
-                #ifdef m_malloc_debug
+#ifdef m_malloc_debug
                 printf("lessCore: %p [%lu]\n", curr, give_back_size);
-                #endif
+#endif
+
+                if (munmap(curr, give_back_size)) {
+                    printf("munmap: %p [%lu] failed\n", curr, give_back_size);
+                }
+
+                curr = newCurr;
+                goto end;
+            }
+
+give_back_first_half:
+            {
+                ChunkHeader_t *newCurr = (ChunkHeader_t *)((size_t)curr + give_back_size);
+                newCurr->size = curr->size - give_back_size;
+                newCurr->next = curr->next;
+
+                if (prev) {
+                    prev->next = newCurr;
+                } else {
+                    *bucket = newCurr;
+                }
+
+#ifdef m_malloc_debug
+                printf("lessCore: %p [%lu]\n", curr, give_back_size);
+#endif
 
                 if (munmap(curr, give_back_size)) {
                     printf("munmap: %p [%lu] failed\n", curr, give_back_size);
@@ -267,23 +330,45 @@ static void lessCore(ChunkHeader_t **bucket) {
                 // curr++, prev++
                 prev = newCurr;
                 curr = newCurr->next;
+
+                goto end;
             }
 
+give_back_last_half:
+            {
+                ChunkHeader_t *free = (ChunkHeader_t *)((size_t)curr + (curr->size - give_back_size));
+                curr->size -= give_back_size;
+
+#ifdef m_malloc_debug
+                printf("lessCore: %p [%lu]\n", free, give_back_size);
+#endif
+
+                if (munmap(free, give_back_size)) {
+                    printf("munmap: %p [%lu] failed\n", free, give_back_size);
+                }
+
+                prev = curr;
+                curr = curr->next;
+                goto end;
+            }
+
+end:
+            nothing = 0;
             if (getBucketTotalSize(bucket) < FREE_SIZE_THRESHOLD) {
                 break;
             }
+
         } else {
-            // curr++, prev++
             prev = curr;
             curr = curr->next;
         }
     }
 
-    #ifdef m_malloc_debug
+#ifdef m_malloc_debug
     if (nothing) {
         printf("lessCore: nothing unmapped\n");
     }
-    #endif
+#endif
 
 }
 
@@ -360,25 +445,25 @@ void *m_malloc(size_t n_user) {
 
     ChunkHeader_t *c;
     
-    #ifdef m_malloc_debug
+#ifdef m_malloc_debug
     printf("\n==> Start malloc user req %lu\n", n_user);
     printf("before find first fit: \n");
     printBucket(&bucket);
-    #endif
+#endif
 
     c = findFirstFit(&bucket, n);
     if (!c) {
 
-        #ifdef m_malloc_debug
+#ifdef m_malloc_debug
         printf("no first fit, moreCore(%lu)\n", n);
-        #endif
+#endif
 
         insertChunk(&bucket, moreCore(n));
 
-        #ifdef m_malloc_debug
+#ifdef m_malloc_debug
         printf("after add moreCore:\n");
         printBucket(&bucket);
-        #endif
+#endif
 
         c = findFirstFit(&bucket, n);
     }
@@ -386,20 +471,20 @@ void *m_malloc(size_t n_user) {
     // if this branch failed it must be mmap failed, or code bug
     if (c) {
 
-        #ifdef m_malloc_debug
+#ifdef m_malloc_debug
         printf("take first fit: %p -> %p [%lu]\n", c, (void *)((size_t)c + c->size), c->size);
         printf("after take first fit:\n");
         printBucket(&bucket);
-        #endif
+#endif
 
         c->size |= CHUNK_ALLOCATED;
     } else {
         return NULL;
     }
 
-    #ifdef m_malloc_debug
+#ifdef m_malloc_debug
     printf("<== End malloc\n");
-    #endif
+#endif
 
     return (void *)&c->next;
 }
@@ -409,46 +494,46 @@ void m_free(void *ptr) {
         return;
     }
 
-    #ifdef m_malloc_debug
+#ifdef m_malloc_debug
     printf("\n==> Start free user ptr %p\n", ptr);
-    #endif
+#endif
 
     ChunkHeader_t *c = (ChunkHeader_t *)(ptr - offsetof(ChunkHeader_t, next));
     if (c->size & CHUNK_ALLOCATED) {
         c->size = c->size & (~CHUNK_ALLOCATED);
 
-        #ifdef m_malloc_debug
+#ifdef m_malloc_debug
         printf("insert chunk: %p -> %p [%lu]\n", c, (void *)((size_t)c + c->size), c->size);
         printf("before insert\n");
         printBucket(&bucket);
-        #endif
+#endif
 
         insertChunk(&bucket, c);
 
-        #ifdef m_malloc_debug
+#ifdef m_malloc_debug
         printf("after insert\n");
         printBucket(&bucket);
-        #endif
+#endif
 
         if (getBucketTotalSize(&bucket) >= FREE_SIZE_THRESHOLD) {
             
-            #ifdef m_malloc_debug
+#ifdef m_malloc_debug
             printf("free memory size exceed threshold\n");
-            #endif
+#endif
 
             lessCore(&bucket);
 
-            #ifdef m_malloc_debug
+#ifdef m_malloc_debug
             printf("after lessCore\n");
             printBucket(&bucket);
-            #endif
+#endif
         }
 
     } else {
         printf("Error: %p: not allocated memory\n", c);
     }
 
-    #ifdef m_malloc_debug
+#ifdef m_malloc_debug
     printf("<== End free\n");
-    #endif
+#endif
 }
