@@ -2,7 +2,7 @@
 A simple M:1 preemptive scheduler
 
 'M' means user created thread, '1' means system thread count. `m_thread` multiplexes single system thread to 
-run any amount of multiple user created threads concurrently.
+run multiple user created threads concurrently.
 
 `m_thread` is not thread(pthread) safe
 
@@ -38,7 +38,7 @@ graph LR;
   s --context switch--> sc[scheduler `schedule`]
 ```
 
-User thread resume from timer interrupt: 
+User thread resumes from timer interrupt: 
 
 ```mermaid
 graph LR;
