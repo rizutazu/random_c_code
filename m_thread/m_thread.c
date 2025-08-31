@@ -56,6 +56,7 @@ static void pushTask(TaskStruct_t *task) {
 
 // get next task to execute of given current
 // return might be null
+// basically round-robin
 static TaskStruct_t *getNextTask(volatile TaskStruct_t *prev) {
     if (!prev) {
         return task_list.sentinel.next;
@@ -213,13 +214,12 @@ int m_thread_yield() {
 }
 
 int m_thread_create(m_thread_t *ret, void (*func)(void *), void *arg) {
-    // block interrupt
-    blockInterrupt();
-
-    if (!func) {
-        unblockInterrupt();
+    if (!func || !ret) {
         return -1;
     }
+
+    // block interrupt
+    blockInterrupt();
 
     TaskStruct_t *task = malloc(sizeof(TaskStruct_t));
     if (!task) {
