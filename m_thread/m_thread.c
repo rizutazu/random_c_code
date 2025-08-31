@@ -82,7 +82,7 @@ TaskStruct_t *removeTask(volatile TaskStruct_t *task) {
         return curr;
     }
 
-    printf("Bug: current not in task_list\n");
+    printf("Bug: task not in task_list\n");
     return NULL;
 }
 
@@ -94,7 +94,6 @@ void freeTask(volatile TaskStruct_t *task) {
 }
 
 static void schedule() {
-
     while (1) {
         // current is not null: from timer interrupt
         if (current) {
@@ -124,7 +123,6 @@ static void schedule() {
 
 // handle thread return, this context blocks timer interrupt
 static void handleReturn() {
-
     if (current) {
         if (removeTask(current)) {
             freeTask(current);
@@ -187,8 +185,33 @@ static void unblockInterrupt() {
     sigprocmask(SIG_UNBLOCK, &set, NULL);
 }
 
-int m_thread_create(m_thread_t *ret, void (*func)(void *), void *arg) {
+m_thread_t m_thread_self() {
+    blockInterrupt();
+    if (current) {
+        m_thread_t id = current->thread_id;
+        unblockInterrupt();
+        return id;
+    }
+    unblockInterrupt();
+    return -1;
+}
 
+int m_thread_yield() {
+    blockInterrupt();
+    if (current) {
+        // go back to scheduler
+        swapcontext(current->context, &schedule_context);
+        // return from scheduler
+        unblockInterrupt();
+        return 0;
+    }
+
+    // not in a thread
+    unblockInterrupt();
+    return -1;
+}
+
+int m_thread_create(m_thread_t *ret, void (*func)(void *), void *arg) {
     // block interrupt
     blockInterrupt();
 
@@ -248,7 +271,6 @@ int m_thread_create(m_thread_t *ret, void (*func)(void *), void *arg) {
 }
 
 int m_thread_start() {
-
     if (started) {
         return -1;
     }

@@ -5,9 +5,12 @@
 void func1(void *arg) {
     int i = 0;
     while (1) {
-        printf("func1! arg %s %d\n", (char *)arg, i++);
+        printf("[thr %lu]func1! %s, count %d\n", m_thread_self(), (char *)arg, i++);
         usleep(10000);
-        if (i > 10) {
+        if (i % 5 == 0) {
+            m_thread_yield();
+        }
+        if (i > 50) {
             printf("func1 bye!\n");
             return;
         }
@@ -17,9 +20,12 @@ void func1(void *arg) {
 void func2(void *arg) {
     int i = 0;
     while (1) {
-        printf("func22! arg %s %d\n", (char *)arg, i++);
+        printf("[thr %lu]func22! %s, count %d\n", m_thread_self(), (char *)arg, i++);
         usleep(10000);
-        if (i > 30) {
+        if (i % 10 == 0) {
+            m_thread_yield();
+        }
+        if (i > 100) {
             printf("func22! bye!\n");
             printf("func22! add tasks!\n");
             m_thread_t t;
@@ -32,9 +38,12 @@ void func2(void *arg) {
 void func3(void *arg) {
     int i = 0;
     while (1) {
-        printf("func333! arg %s %d\n", (char *)arg, i++);
+        printf("[thr %lu]func333! %s, count %d\n", m_thread_self(), (char *)arg, i++);
         usleep(10000);
-        if (i > 50) {
+        if (i % 20 == 0) {
+            m_thread_yield();
+        }
+        if (i > 200) {
             printf("func333! bye!\n");
             printf("func333! add tasks!\n");
             m_thread_t t;
