@@ -286,7 +286,6 @@ int m_thread_start() {
     char stack[SIGSTKSZ];
     return_context.uc_stack.ss_sp = stack;
     return_context.uc_stack.ss_size = SIGSTKSZ;
-    return_context.uc_link = &schedule_context;
     makecontext(&return_context, handleReturn, 0);
 
     installInterruptHandler();
