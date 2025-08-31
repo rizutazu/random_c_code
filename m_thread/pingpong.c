@@ -3,6 +3,8 @@
 
 #include "m_thread.h"
 
+#define PINGPONG_ROUND 3
+
 struct fds {
     int read;
     int write;
@@ -12,51 +14,38 @@ void write_read(void *arg) {
     struct fds *fds = arg;
     char buf = 'a';
     int count = 0;
-    while (count < 3) {
+    while (count < PINGPONG_ROUND) {
 
         printf("Thread %lu: --> %c\n", m_thread_self(), buf);
-        while (1) {
-            if (write(fds->write, &buf, 1) == 1) {
-                break;
-            }
-        }
+        write(fds->write, &buf, 1);
 
-        while (1) {
-            if (read(fds->read, &buf, 1) == 1) {
-                printf("Thread %lu: <-- %c\n", m_thread_self(), buf);
+        read(fds->read, &buf, 1);
+        printf("Thread %lu: <-- %c\n", m_thread_self(), buf);
 
-                printf("Thread %lu: %c++ => %c\n", m_thread_self(), buf, buf + 1);
-                buf++;
-                count++;
-                break;
-            }
-        }
+        printf("Thread %lu: %c++ => %c\n", m_thread_self(), buf, buf + 1);
+        buf++;
+
+        count++;
     }
+
 }
 
 void read_write(void *arg) {
     struct fds *fds = arg;
     char buf = 'a';
     int count = 0;
-    while (count < 3) {
+    while (count < PINGPONG_ROUND) {
 
-        while (1) {
-            if (read(fds->read, &buf, 1) == 1) {
-                printf("Thread %lu: <-- %c\n", m_thread_self(), buf);
-                break;
-            }
-        }
+        read(fds->read, &buf, 1);
+        printf("Thread %lu: <-- %c\n", m_thread_self(), buf);
 
         printf("Thread %lu: %c++ => %c\n", m_thread_self(), buf, buf + 1);
         buf++;
-        printf("Thread %lu: --> %c\n", m_thread_self(), buf);
 
-        while (1) {
-            if (write(fds->write, &buf, 1) == 1) {
-                count++;
-                break;
-            }
-        }
+        printf("Thread %lu: --> %c\n", m_thread_self(), buf);
+        write(fds->write, &buf, 1);
+
+        count++;
     }
 }
 

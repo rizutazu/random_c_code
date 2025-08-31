@@ -95,6 +95,27 @@ static void freeTask(volatile TaskStruct_t *task) {
     free((TaskStruct_t *)task);
 }
 
+// allocate memory for a task
+static TaskStruct_t *allocateTask() {
+
+    TaskStruct_t *task = malloc(sizeof(TaskStruct_t));
+    if (!task) {
+        return NULL;
+    }
+
+    task->thread_id = -1;
+    task->next = NULL;
+    task->context = malloc(sizeof(ucontext_t));
+    task->stack = malloc(SIGSTKSZ);
+
+    if (!task->context || !task->stack) {
+        freeTask(task);
+        return NULL;
+    }
+
+    return task;
+}
+
 static void schedule() {
     while (1) {
         // current is not null: from timer interrupt
@@ -165,7 +186,7 @@ static void uninstallTimer() {
 static void installInterruptHandler() {
     struct sigaction action = {0};
     action.sa_sigaction = timerInterrupt;
-    action.sa_flags = SA_SIGINFO;
+    action.sa_flags = SA_SIGINFO | SA_RESTART;
     sigaction(TIMER_INTERRUPT_SIGNAL, &action, NULL);
 }
 
@@ -218,39 +239,15 @@ int m_thread_create(m_thread_t *ret, void (*func)(void *), void *arg) {
         return -1;
     }
 
-    // block interrupt
-    blockInterrupt();
-
-    TaskStruct_t *task = malloc(sizeof(TaskStruct_t));
+    TaskStruct_t *task = allocateTask();
     if (!task) {
-        unblockInterrupt();
-        return -1;
-    }
-
-    task->next = NULL;
-
-    task->context = malloc(sizeof(ucontext_t));
-    if (!task->context) {
-        free(task);
-        unblockInterrupt();
         return -1;
     }
 
     if (getcontext(task->context)) {
-        free(task->context);
-        free(task);
-        unblockInterrupt();
+        freeTask(task);
         return -1;
     }
-
-    char *stack = malloc(SIGSTKSZ);
-    if (!stack) {
-        free(task->context);
-        free(task);
-        unblockInterrupt();
-        return -1;
-    }
-    task->stack = stack;
 
     task->context->uc_stack.ss_sp = task->stack;
     task->context->uc_stack.ss_size = SIGSTKSZ;
@@ -262,12 +259,16 @@ int m_thread_create(m_thread_t *ret, void (*func)(void *), void *arg) {
     typedef void (*func_ptr) (void);
     makecontext(task->context, (func_ptr)func, 1, arg);
 
-    pushTask(task);
+    // enter critical section
+    blockInterrupt();
 
     task->thread_id = thread_count++;
-    *ret = task->thread_id;
+    pushTask(task);
 
     unblockInterrupt();
+
+    *ret = task->thread_id;
+
     return 0;
 }
 
