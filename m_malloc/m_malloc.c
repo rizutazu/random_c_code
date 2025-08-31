@@ -354,7 +354,7 @@ give_back_last_half:
 
 end:
             nothing = 0;
-            if (getBucketTotalSize(bucket) < FREE_SIZE_THRESHOLD) {
+            if (getBucketTotalSize(bucket) < FREE_SIZE_THRESHOLD / 2) {
                 break;
             }
 
