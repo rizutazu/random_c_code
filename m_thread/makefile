@@ -10,6 +10,6 @@ main32_debug: m_thread.h m_thread.c main.c
 pingpong:  m_thread.h m_thread.c pingpong.c
 	gcc -o pingpong pingpong.c m_thread.c -std=gnu11
 clean:
-	rm -f main main_debug main32 main32_debug
+	rm -f main main_debug main32 main32_debug pingpong
 
 all: main main_debug main32 main32_debug

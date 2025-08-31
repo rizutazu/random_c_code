@@ -34,16 +34,16 @@ static volatile TaskStruct_t *current;
 static m_thread_t thread_count;
 
 // schedule_context: context of schedule() function
-ucontext_t schedule_context;
+static ucontext_t schedule_context;
 
 // return_context: uc_link of user thread, which runs after user thread return, handles task delete
-ucontext_t return_context;
+static ucontext_t return_context;
 
 // schedule context has started
 static int started;
 
 // push a task into task list
-void pushTask(TaskStruct_t *task) {
+static void pushTask(TaskStruct_t *task) {
     if (!task) {
         return;
     }
@@ -56,7 +56,7 @@ void pushTask(TaskStruct_t *task) {
 
 // get next task to execute of given current
 // return might be null
-TaskStruct_t *getNextTask(volatile TaskStruct_t *prev) {
+static TaskStruct_t *getNextTask(volatile TaskStruct_t *prev) {
     if (!prev) {
         return task_list.sentinel.next;
     }
@@ -66,7 +66,8 @@ TaskStruct_t *getNextTask(volatile TaskStruct_t *prev) {
     return task_list.sentinel.next;
 }
 
-TaskStruct_t *removeTask(volatile TaskStruct_t *task) {
+// remove task from task_list, on success, return removed task, on failure, return NULL
+static TaskStruct_t *removeTask(volatile TaskStruct_t *task) {
     if (!task) {
         return NULL;
     }
@@ -87,7 +88,7 @@ TaskStruct_t *removeTask(volatile TaskStruct_t *task) {
 }
 
 // free memory owned by task
-void freeTask(volatile TaskStruct_t *task) {
+static void freeTask(volatile TaskStruct_t *task) {
     free(task->stack);
     free(task->context);
     free((TaskStruct_t *)task);
