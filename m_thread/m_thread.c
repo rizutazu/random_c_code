@@ -4,15 +4,21 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <stdio.h>
+#include <time.h>
 #include <unistd.h>
 #include <bits/sigaction.h>
-#include <sys/time.h>
 #include <bits/sigstack.h>
 
-#define TIMER_INTERRUPT_SIGNAL SIGALRM
+#define MS_TO_NS(ms) (ms * 1000000)
+
+#define INTERRUPT_SIGNAL SIGUSR1
 
 // 10ms
-#define INTERRUPT_INTERVAL 10000
+#define INTERRUPT_INTERVAL MS_TO_NS(10)
+
+// magic number
+#define SWAPCONTEXT_SIZE 1024
+#define SETCONTEXT_SIZE 1024
 
 typedef struct TaskStruct_t {
     m_thread_t thread_id;
@@ -41,6 +47,9 @@ static ucontext_t return_context;
 
 // schedule context has started
 static int started;
+
+// global timer
+static timer_t timer;
 
 // push a task into task list
 static void pushTask(TaskStruct_t *task) {
@@ -84,15 +93,15 @@ static TaskStruct_t *removeTask(volatile TaskStruct_t *task) {
         return curr;
     }
 
-    printf("Bug: task not in task_list\n");
+    fprintf(stderr, "[Bug: task not in task_list]\n");
     return NULL;
 }
 
 // free memory owned by task
-static void freeTask(volatile TaskStruct_t *task) {
+static void freeTask(TaskStruct_t *task) {
     free(task->stack);
     free(task->context);
-    free((TaskStruct_t *)task);
+    free(task);
 }
 
 // allocate memory for a task
@@ -126,7 +135,7 @@ static void schedule() {
                 swapcontext(&schedule_context, current->context);
                 // back from thread context
             } else {
-                printf("[Bug: no next task]\n");
+                fprintf(stderr, "[Bug: no next task]\n");
                 return;
             }
         // current is null: from return_context or initial
@@ -148,64 +157,100 @@ static void schedule() {
 static void handleReturn() {
     if (current) {
         if (removeTask(current)) {
-            freeTask(current);
+            freeTask((TaskStruct_t *)current);
             current = NULL;
         } else {
-            printf("[Bug: current %p not in task_list]\n", current);
+            fprintf(stderr, "[Bug: current %p not in task_list]\n", current);
             current = NULL;
         }
     } else {
-        printf("[Bug: null current in handleReturn]\n");
+        fprintf(stderr, "[Bug: null current in handleReturn]\n");
     }
 
     setcontext(&schedule_context);
 }
 
+static int isManipulatingContext(void *ip) {
+    void *base_swap = swapcontext;
+    void *base_set = setcontext;
+    return (ip >= base_swap && ip <= base_swap + SWAPCONTEXT_SIZE)
+        || (ip >= base_set && ip <= base_set + SETCONTEXT_SIZE);
+}
+
+static void *getInterruptIP(void *ucontext) {
+    ucontext_t *uc = ucontext;
+    struct sigcontext *frame = (struct sigcontext *)&uc->uc_mcontext;
+#ifdef __x86_64__
+    return (void *)frame->rip;
+#else
+    return (void *)frame->eip;
+#endif
+}
+
 static void timerInterrupt(int sig, siginfo_t *info, void *ucontext) {
     if (current) {
-        // switch to scheduler context
+
         // printf("[Timer interrupt %lu]\n", current->thread_id);
+
+        void *ip = getInterruptIP(ucontext);
+        if (isManipulatingContext(ip)) {
+            // printf("[In critical section]\n");
+            // thread is manipulating context, do nothing
+            return;
+        }
+
+        // switch to scheduler context
         swapcontext(current->context, &schedule_context);
         // back from scheduler context, continue execution
     } else {
-        //
-        printf("[No current in timer interrupt]\n");
+        fprintf(stderr, "[Bug: No current in timer interrupt]\n");
     }
 }
 
 static void installTimer() {
-    // 10ms
-    struct itimerval timer = {.it_interval.tv_usec = INTERRUPT_INTERVAL, .it_value.tv_usec = INTERRUPT_INTERVAL};
-    setitimer(ITIMER_REAL, &timer, NULL);
+    struct sigevent sev = {.sigev_signo = INTERRUPT_SIGNAL, .sigev_notify = SIGEV_SIGNAL};
+    if (timer_create(CLOCK_REALTIME, &sev, &timer)) {
+        perror("timer create failed in installTimer");
+    }
+    struct itimerspec spec = {.it_interval.tv_nsec = INTERRUPT_INTERVAL, .it_value.tv_nsec = INTERRUPT_INTERVAL};
+    if (timer_settime(timer, 0, &spec, NULL)) {
+        perror("timer settime failed in installTimer");
+    }
+
 }
 
 static void uninstallTimer() {
-    setitimer(ITIMER_REAL, NULL, NULL);
+    struct itimerspec spec = {0};
+    if (timer_settime(timer, 0, &spec, NULL)) {
+        perror("timer settime failed in uninstallTimer");
+    }
 }
 
 static void installInterruptHandler() {
     struct sigaction action = {0};
     action.sa_sigaction = timerInterrupt;
     action.sa_flags = SA_SIGINFO | SA_RESTART;
-    sigaction(TIMER_INTERRUPT_SIGNAL, &action, NULL);
+    sigaction(INTERRUPT_SIGNAL, &action, NULL);
 }
 
 static void uninstallInterruptHandler() {
-    sigaction(TIMER_INTERRUPT_SIGNAL, NULL, NULL);
+    struct sigaction action = {0};
+    action.sa_handler = SIG_DFL;
+    sigaction(INTERRUPT_SIGNAL, &action, NULL);
 }
 
-static void blockInterrupt() {
+void blockInterrupt() {
     sigset_t set;
-    sigemptyset(&set);
-    sigaddset(&set, TIMER_INTERRUPT_SIGNAL);
-    sigprocmask(SIG_BLOCK, &set, NULL);
+    sigprocmask(SIG_SETMASK, NULL, &set);
+    sigaddset(&set, INTERRUPT_SIGNAL);
+    sigprocmask(SIG_SETMASK, &set, NULL);
 }
 
-static void unblockInterrupt() {
+void unblockInterrupt() {
     sigset_t set;
-    sigemptyset(&set);
-    sigaddset(&set, TIMER_INTERRUPT_SIGNAL);
-    sigprocmask(SIG_UNBLOCK, &set, NULL);
+    sigprocmask(SIG_SETMASK, NULL, &set);
+    sigdelset(&set, INTERRUPT_SIGNAL);
+    sigprocmask(SIG_SETMASK, &set, NULL);
 }
 
 m_thread_t m_thread_self() {
@@ -234,6 +279,17 @@ int m_thread_yield() {
     return -1;
 }
 
+void m_thread_sleep(unsigned int sec) {
+    m_thread_usleep(sec * 1000000);
+}
+
+void m_thread_usleep(unsigned int us) {
+    volatile clock_t s = clock();
+    while (clock() - s <= us) {
+        m_thread_yield();
+    }
+}
+
 int m_thread_create(m_thread_t *ret, void (*func)(void *), void *arg) {
     if (!func || !ret) {
         return -1;
@@ -254,7 +310,7 @@ int m_thread_create(m_thread_t *ret, void (*func)(void *), void *arg) {
     task->context->uc_link = &return_context;
 
     // user thread: do not block timer interrupt
-    sigdelset(&task->context->uc_sigmask, SIGALRM);
+    sigdelset(&task->context->uc_sigmask, INTERRUPT_SIGNAL);
 
     typedef void (*func_ptr) (void);
     makecontext(task->context, (func_ptr)func, 1, arg);
