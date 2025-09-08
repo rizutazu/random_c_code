@@ -25,7 +25,7 @@ void m_thread_usleep(unsigned int us);
 // start all the threads created before, block until everything finish
 int m_thread_start();
 
-// make an expression `x` async signal safe
+// make an expression `x` async signal safe by making it uninterruptible
 // example: async_signal_safe(x++;y++;);
 // trick: make all function calls to a specific function safe:
     // #define your_function(...) async_signal_safe(your_function(__VA_ARGS__))

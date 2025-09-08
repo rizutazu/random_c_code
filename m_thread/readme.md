@@ -4,7 +4,7 @@ A simple M:1 preemptive thread implementation
 'M' means multiple user created thread, '1' means one system thread. `m_thread` multiplexes single system thread to 
 run multiple user created threads concurrently.
 
-`m_thread` is not thread(pthread) safe, it shall be run in single system thread only 
+`m_thread` is not multi-thread(pthread) safe, it shall be run in single system thread only 
 
 ## Usage
 - `#include "m_thread.h"`
@@ -87,5 +87,8 @@ safe:
 - The solution is to add a "wrapper" function for user thread (see `userThreadStart()`), this function marks the thread
 as "running" before entering the actual user thread, and unmark it after the actual user thread returns. Now the signal handler only
 needs to check whether user thread is "running" to determine whether it is safe to save user context
+- This solution has never tried to make functions mentioned above "to become async signal safe", it essentially eliminates
+the possibility of re-entering an unsafe function which is interrupted, when there is only one system thread. 
+- So `m_thread` is still not multi-thread safe, this does not violate "async signal safe is stronger in reentrancy than multi-thread" 
 
   
