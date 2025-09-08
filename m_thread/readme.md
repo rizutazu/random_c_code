@@ -1,5 +1,5 @@
 # `m_thread`
-A simple M:1 preemptive scheduler
+A simple M:1 preemptive thread implementation
 
 'M' means multiple user created thread, '1' means one system thread. `m_thread` multiplexes single system thread to 
 run multiple user created threads concurrently.
@@ -60,7 +60,7 @@ graph LR;
   r --context switch--> sc[scheduler `schedule`]
 ```
 
-## Issues about Async signal safe
+## Tackling issues about async signal safe
 `m_malloc` have tried the following ways to tackle the problem that functions in `ucontext.h` are not async signal
 safe:
 - Only user threads can be interrupted. Both scheduler, signal handler and *return context* block signal, so it is safe
@@ -71,10 +71,11 @@ to use those functions there
   scheduler
   - When user thread returns, it will eventually call `setcontext()` to switch to scheduler, this might be problematic,
   though it is OK in x86_64 since the implementation blocks the signal first
-- To make `swapcontext()` and `setcontext()` "atomic", we need some ways to detect whether we interrupted them, by:
+- To make `swapcontext()` and `setcontext()` safe, we need some ways to detect whether we interrupted them, by:
   1. Get the original program counter when the interruption happened, this is done by interpreting the third argument 
-  `void *ucontext` of the signal handler, implemented in `getInterruptIP()`, **this is architecture specific**.
-  2. Compare it with the address range of these functions. We cannot easily get the exact size of a function in C, so I 
+  `void *ucontext` of the signal handler, implemented in `getInterruptIP()`. 
+  **This is architecture specific, only i386 and x86_64 are implemented here.**
+  2. Compare it with the address range of these functions. We cannot easily get the exact size of a function in C, so we 
   just assumed it is `1024`
 - If interruption happened during them, the signal handler will directly return
   
