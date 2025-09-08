@@ -25,15 +25,15 @@ void m_thread_usleep(unsigned int us);
 // start all the threads created before, block until everything finish
 int m_thread_start();
 
-// if you don't want any interruption to be happened during expression `x`, use this
-// example: block_interruption_execute(x = x + 1;)
-// trick: make all calls to a specific function block interruption:
-    // #define your_function(...) block_interruption_execute(your_function(__VA_ARGS__))
+// make an expression `x` async signal safe
+// example: async_signal_safe(x++;y++;);
+// trick: make all function calls to a specific function safe:
+    // #define your_function(...) async_signal_safe(your_function(__VA_ARGS__))
     // e.g., printf:
-    // #define printf(...) block_interruption_execute(printf(__VA_ARGS__))
-#define block_interruption_execute(x) do {   \
-    extern void blockInterrupt();   \
-    extern void unblockInterrupt(); \
+    // #define printf(...) async_signal_safe(printf(__VA_ARGS__))
+#define async_signal_safe(x) do {   \
+    void blockInterrupt();   \
+    void unblockInterrupt(); \
     blockInterrupt();   \
     x;  \
     unblockInterrupt(); \

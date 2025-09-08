@@ -16,6 +16,9 @@ later automatically
 - Threads can call `m_thread_yield()` if they want to give up the CPU
 - Threads can call `m_thread_self()` to get its thread id, just like `pthread_self()`
 - Sleep-related actions shall be done via `m_thread_sleep()` and `m_thread_usleep()`
+- Threads are not allowed to use async signal safe functions (e.g. `malloc()`, `printf()`), or you pay the cost.
+- You can use `async_signal_safe(x)` to make expression `x` async signal safe
+- To make function calls to a specific function async signal safe (e.g. `printf()`): `#define printf(...) async_signal_safe(printf(__VA_ARGS__))`
 
 ## Examples
 - `main`: `make main`
@@ -24,18 +27,23 @@ later automatically
 ## How it works
 `m_thread` is implemented by utilizing functions in `ucontext.h` to perform context switch (which are NOT async signal 
 safe, see descriptions below), `sigaction` to install signal handler, and using `timer_settime` to generate a 
-periodical signal. Signal handler will context switches back to scheduler, implementing preemptive scheduling.
+periodical signal. 
+
+Signal handler will context switches back to scheduler, implementing preemptive scheduling.
+
 When user thread returns, it will enter a special context *return context*, which performs thread removal, resource 
 deallocation, and finally, switch back to scheduler.
 
 ## Execution diagram
 
 On start:
+
 ```mermaid
 graph LR;
   start[`m_thread_start`] ----> sc[scheduler `schedule`]
   sc --context switch--> u[User thread]
 ```
+
 During user thread execution, timer interrupt:
 
 ```mermaid
@@ -63,19 +71,21 @@ graph LR;
 ## Tackling issues about async signal safe
 `m_malloc` have tried the following ways to tackle the problem that functions in `ucontext.h` are not async signal
 safe:
-- Only user threads can be interrupted. Both scheduler, signal handler and *return context* block signal, so it is safe
-to use those functions there
-  - Return from signal handler (back to user thread) is handled by kernel, there is no need to worry about it.
-  - When switching from scheduler to user thread, `swapcontext()` may unblock signal **before** it restores user 
-  context, if the interruption happens exactly after it, the user thread context is corrupted when switching back to 
+- Only user threads can be interrupted. Both scheduler, signal handler and *return context* cannot be interrupted 
+(signal blocked), so it is safe to use these functions there
+- Consider these possible cases:
+  1. When switching from scheduler to user thread, `swapcontext()` may set to unblock signal **before** it restores user 
+  context, if the interruption happens at this point, user thread context may be corrupted when `swapcontext()` back to 
   scheduler
-  - When user thread returns, it will eventually call `setcontext()` to switch to scheduler, this might be problematic,
-  though it is OK in x86_64 since the implementation blocks the signal first
-- To make `swapcontext()` and `setcontext()` safe, we need some ways to detect whether we interrupted them, by:
-  1. Get the original program counter when the interruption happened, this is done by interpreting the third argument 
-  `void *ucontext` of the signal handler, implemented in `getInterruptIP()`. 
-  **This is architecture specific, only i386 and x86_64 are implemented here.**
-  2. Compare it with the address range of these functions. We cannot easily get the exact size of a function in C, so we 
-  just assumed it is `1024`
-- If interruption happened during them, the signal handler will directly return
+  2. If case 1 is handled gracefully, then it can only happen before the user thread runs its first instruction, as correctly saved
+  user context must be the `swapcontext()` within the signal handler. Because signal handler blocks signal, there is no way 
+  to corrupt it now
+  3. When returning from signal handler (back to user thread), the context switch is handled by kernel, there is no need
+  to worry about it
+  4. When user thread returns, it will eventually call `setcontext()` to switch to scheduler, this might be problematic,
+  though it is OK in x86_64 since the implementation of `setcontext()` blocks the signal first
+- The solution is to add a "wrapper" function for user thread (see `userThreadStart()`), this function marks the thread
+as "running" before entering the actual user thread, and unmark it after the actual user thread returns. Now the signal handler only
+needs to check whether user thread is "running" to determine whether it is safe to save user context
+
   

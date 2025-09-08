@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <unistd.h>
-
 #include "m_thread.h"
+
+#define printf(...) async_signal_safe(printf(__VA_ARGS__))
 
 #define PINGPONG_ROUND 3
 
@@ -27,7 +28,6 @@ void write_read(void *arg) {
 
         count++;
     }
-
 }
 
 void read_write(void *arg) {

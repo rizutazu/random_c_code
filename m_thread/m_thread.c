@@ -16,14 +16,11 @@
 // 10ms
 #define INTERRUPT_INTERVAL MS_TO_NS(10)
 
-// magic number
-#define SWAPCONTEXT_SIZE 1024
-#define SETCONTEXT_SIZE 1024
-
 typedef struct TaskStruct_t {
     m_thread_t thread_id;
     struct TaskStruct_t *next;
 
+    int running;
     char *stack;
     ucontext_t *context;
 } TaskStruct_t;
@@ -106,13 +103,13 @@ static void freeTask(TaskStruct_t *task) {
 
 // allocate memory for a task
 static TaskStruct_t *allocateTask() {
-
     TaskStruct_t *task = malloc(sizeof(TaskStruct_t));
     if (!task) {
         return NULL;
     }
 
     task->thread_id = -1;
+    task->running = 0;
     task->next = NULL;
     task->context = malloc(sizeof(ucontext_t));
     task->stack = malloc(SIGSTKSZ);
@@ -156,11 +153,14 @@ static void schedule() {
 // handle thread return, this context blocks timer interrupt
 static void handleReturn() {
     if (current) {
+        if (current->running) {
+            fprintf(stderr, "[Bug: current %lld is running]\n", current->thread_id);
+        }
         if (removeTask(current)) {
             freeTask((TaskStruct_t *)current);
             current = NULL;
         } else {
-            fprintf(stderr, "[Bug: current %p not in task_list]\n", current);
+            fprintf(stderr, "[Bug: current %lld not in task_list]\n", current->thread_id);
             current = NULL;
         }
     } else {
@@ -170,32 +170,12 @@ static void handleReturn() {
     setcontext(&schedule_context);
 }
 
-static int isManipulatingContext(void *ip) {
-    void *base_swap = swapcontext;
-    void *base_set = setcontext;
-    return (ip >= base_swap && ip <= base_swap + SWAPCONTEXT_SIZE)
-        || (ip >= base_set && ip <= base_set + SETCONTEXT_SIZE);
-}
-
-static void *getInterruptIP(void *ucontext) {
-    ucontext_t *uc = ucontext;
-    struct sigcontext *frame = (struct sigcontext *)&uc->uc_mcontext;
-#ifdef __x86_64__
-    return (void *)frame->rip;
-#else
-    return (void *)frame->eip;
-#endif
-}
-
 static void timerInterrupt(int sig, siginfo_t *info, void *ucontext) {
     if (current) {
 
         // printf("[Timer interrupt %lu]\n", current->thread_id);
 
-        void *ip = getInterruptIP(ucontext);
-        if (isManipulatingContext(ip)) {
-            // printf("[In critical section]\n");
-            // thread is manipulating context, do nothing
+        if (!current->running) {
             return;
         }
 
@@ -204,6 +184,17 @@ static void timerInterrupt(int sig, siginfo_t *info, void *ucontext) {
         // back from scheduler context, continue execution
     } else {
         fprintf(stderr, "[Bug: No current in timer interrupt]\n");
+    }
+}
+
+// to deal with async signal safe problems
+static void userThreadStart(void (*func)(void *), void *arg) {
+    if (current) {
+        current->running = 1;
+        func(arg);
+        current->running = 0;
+    } else {
+        fprintf(stderr, "[Bug: no current in userThreadStart]\n");
     }
 }
 
@@ -216,7 +207,6 @@ static void installTimer() {
     if (timer_settime(timer, 0, &spec, NULL)) {
         perror("timer settime failed in installTimer");
     }
-
 }
 
 static void uninstallTimer() {
@@ -295,9 +285,22 @@ int m_thread_create(m_thread_t *ret, void (*func)(void *), void *arg) {
         return -1;
     }
 
-    TaskStruct_t *task = allocateTask();
-    if (!task) {
-        return -1;
+    TaskStruct_t *task;
+
+    if (started) {
+        // malloc is not async signal safe!!!
+        async_signal_safe(
+            task = allocateTask();
+            if (!task) {
+                unblockInterrupt();
+                return -1;
+            };
+        );
+    } else {
+        task = allocateTask();
+        if (!task) {
+            return -1;
+        }
     }
 
     if (getcontext(task->context)) {
@@ -313,15 +316,17 @@ int m_thread_create(m_thread_t *ret, void (*func)(void *), void *arg) {
     sigdelset(&task->context->uc_sigmask, INTERRUPT_SIGNAL);
 
     typedef void (*func_ptr) (void);
-    makecontext(task->context, (func_ptr)func, 1, arg);
+    makecontext(task->context, (func_ptr)userThreadStart, 2, func, arg);
 
-    // enter critical section
-    blockInterrupt();
-
-    task->thread_id = thread_count++;
-    pushTask(task);
-
-    unblockInterrupt();
+    if (started) {
+        async_signal_safe(
+            task->thread_id = thread_count++;
+            pushTask(task);
+        );
+    } else {
+        task->thread_id = thread_count++;
+        pushTask(task);
+    }
 
     *ret = task->thread_id;
 
