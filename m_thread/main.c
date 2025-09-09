@@ -8,7 +8,7 @@ void func1(void *arg) {
     int i = 0;
     while (1) {
         printf("[Thread %lld]func1! %s, count %d\n", m_thread_self(), (char *)arg, i++);
-        m_thread_usleep(20000);
+        m_thread_usleep(100000);
         if (i % 5 == 0) {
             m_thread_yield();
         }
@@ -23,7 +23,7 @@ void func2(void *arg) {
     int i = 0;
     while (1) {
         printf("[Thread %lld]func22! %s, count %d\n", m_thread_self(), (char *)arg, i++);
-        m_thread_usleep(15000);
+        m_thread_usleep(50000);
         if (i % 10 == 0) {
             m_thread_yield();
         }
@@ -41,7 +41,7 @@ void func3(void *arg) {
     int i = 0;
     while (1) {
         printf("[Thread %lld]func333! %s, count %d\n", m_thread_self(), (char *)arg, i++);
-        m_thread_usleep(10000);
+        m_thread_usleep(25000);
         if (i % 20 == 0) {
             m_thread_yield();
         }
@@ -61,7 +61,7 @@ void func4(void *arg) {
     int i = 0;
     while (1) {
         printf("[Thread %lld]func4444! %s, count %d\n", m_thread_self(), (char *)arg, i++);
-        m_thread_usleep(5000);
+        m_thread_usleep(20000);
         if (i % 25 == 0) {
             m_thread_yield();
         }

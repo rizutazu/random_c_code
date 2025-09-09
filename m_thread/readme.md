@@ -21,8 +21,9 @@ later automatically
 - To make function calls to a specific function async signal safe (e.g. `printf()`): `#define printf(...) async_signal_safe(printf(__VA_ARGS__))`
 
 ## Examples
-- `main`: `make main`
-- `pingpong`: `make pingpong`
+- `main`: `make main` : simple presentation
+- `pingpong`: `make pingpong` : two threads communicate with each other by `pipe()`
+- `produce_consume`: `make produce_consume` : multiple producer threads communicate with multiple consumer threads randomly
 
 ## How it works
 `m_thread` is implemented by utilizing functions in `ucontext.h` to perform context switch (which are NOT async signal 
@@ -85,8 +86,10 @@ safe:
   4. When user thread returns, it will eventually call `setcontext()` to switch to scheduler, this might be problematic,
   though it is OK in x86_64 since the implementation of `setcontext()` blocks the signal first
 - The solution is to add a "wrapper" function for user thread (see `userThreadStart()`), this function marks the thread
-as "running" before entering the actual user thread, and unmark it after the actual user thread returns. Now the signal handler only
-needs to check whether user thread is "running" to determine whether it is safe to save user context
+as "started" before entering the actual user thread, and unmark it after the actual user thread returns. Now the signal handler only
+needs to check whether user thread is "started" to determine whether it is safe to save user context
+
+Note that:
 - This solution has never tried to make functions mentioned above "to become async signal safe", it essentially eliminates
 the possibility of re-entering an unsafe function which is interrupted, when there is only one system thread. 
 - So `m_thread` is still not multi-thread safe, this does not violate "async signal safe is stronger in reentrancy than multi-thread" 

@@ -17,10 +17,10 @@ int m_thread_yield();
 m_thread_t m_thread_self();
 
 // sleep sec seconds
-void m_thread_sleep(unsigned int sec);
+void m_thread_sleep(unsigned long long sec);
 
-// sleep us useconds
-void m_thread_usleep(unsigned int us);
+// sleep us microseconds
+void m_thread_usleep(unsigned long long us);
 
 // start all the threads created before, block until everything finish
 int m_thread_start();

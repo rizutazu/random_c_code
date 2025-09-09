@@ -9,9 +9,10 @@
 #include <bits/sigaction.h>
 #include <bits/sigstack.h>
 
-#define MS_TO_NS(ms) (ms * 1000000)
-
 #define INTERRUPT_SIGNAL SIGUSR1
+
+// millisecond to nanosecond
+#define MS_TO_NS(ms) (ms * 1000000)
 
 // 10ms
 #define INTERRUPT_INTERVAL MS_TO_NS(10)
@@ -20,7 +21,7 @@ typedef struct TaskStruct_t {
     m_thread_t thread_id;
     struct TaskStruct_t *next;
 
-    int running;
+    int started;
     char *stack;
     ucontext_t *context;
 } TaskStruct_t;
@@ -109,7 +110,7 @@ static TaskStruct_t *allocateTask() {
     }
 
     task->thread_id = -1;
-    task->running = 0;
+    task->started = 0;
     task->next = NULL;
     task->context = malloc(sizeof(ucontext_t));
     task->stack = malloc(SIGSTKSZ);
@@ -153,7 +154,7 @@ static void schedule() {
 // handle thread return, this context blocks timer interrupt
 static void handleReturn() {
     if (current) {
-        if (current->running) {
+        if (current->started) {
             fprintf(stderr, "[Bug: current %lld is running]\n", current->thread_id);
         }
         if (removeTask(current)) {
@@ -170,12 +171,12 @@ static void handleReturn() {
     setcontext(&schedule_context);
 }
 
-static void timerInterrupt(int sig, siginfo_t *info, void *ucontext) {
+static void timerInterrupt(int sig) {
     if (current) {
 
         // printf("[Timer interrupt %lu]\n", current->thread_id);
 
-        if (!current->running) {
+        if (!current->started) {
             return;
         }
 
@@ -190,9 +191,9 @@ static void timerInterrupt(int sig, siginfo_t *info, void *ucontext) {
 // to deal with async signal safe problems
 static void userThreadStart(void (*func)(void *), void *arg) {
     if (current) {
-        current->running = 1;
+        current->started = 1;
         func(arg);
-        current->running = 0;
+        current->started = 0;
     } else {
         fprintf(stderr, "[Bug: no current in userThreadStart]\n");
     }
@@ -218,8 +219,8 @@ static void uninstallTimer() {
 
 static void installInterruptHandler() {
     struct sigaction action = {0};
-    action.sa_sigaction = timerInterrupt;
-    action.sa_flags = SA_SIGINFO | SA_RESTART;
+    action.sa_handler = timerInterrupt;
+    action.sa_flags = SA_RESTART;
     sigaction(INTERRUPT_SIGNAL, &action, NULL);
 }
 
@@ -257,6 +258,7 @@ m_thread_t m_thread_self() {
 int m_thread_yield() {
     blockInterrupt();
     if (current) {
+        // printf("[Thread %lld]yield\n", current->thread_id);
         // go back to scheduler
         swapcontext(current->context, &schedule_context);
         // return from scheduler
@@ -269,14 +271,19 @@ int m_thread_yield() {
     return -1;
 }
 
-void m_thread_sleep(unsigned int sec) {
+void m_thread_sleep(unsigned long long sec) {
     m_thread_usleep(sec * 1000000);
 }
 
-void m_thread_usleep(unsigned int us) {
-    volatile clock_t s = clock();
-    while (clock() - s <= us) {
-        m_thread_yield();
+void m_thread_usleep(unsigned long long us) {
+    struct timespec start, now;
+    clock_gettime(CLOCK_REALTIME, &start);
+    while (1) {
+        clock_gettime(CLOCK_REALTIME, &now);
+        if ((now.tv_sec - start.tv_sec) * 1000000
+            + (now.tv_nsec - start.tv_nsec) / 1000 > us) {
+            break;
+        }
     }
 }
 
