@@ -280,8 +280,10 @@ void m_thread_usleep(unsigned long long us) {
     clock_gettime(CLOCK_REALTIME, &start);
     while (1) {
         clock_gettime(CLOCK_REALTIME, &now);
-        if ((now.tv_sec - start.tv_sec) * 1000000
-            + (now.tv_nsec - start.tv_nsec) / 1000 > us) {
+        const unsigned long long elapsed = (now.tv_sec - start.tv_sec) * 1000000 + (now.tv_nsec - start.tv_nsec) / 1000;
+        if (elapsed < us) {
+            m_thread_yield();
+        } else {
             break;
         }
     }
