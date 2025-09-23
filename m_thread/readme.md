@@ -70,7 +70,7 @@ graph LR;
 ```
 
 ## Tackling issues about async signal safe
-`m_malloc` have tried the following ways to tackle the problem that functions in `ucontext.h` are not async signal
+`m_thread` have tried the following ways to tackle the problem that functions in `ucontext.h` are not async signal
 safe:
 - Only user threads can be interrupted. Both scheduler, signal handler and *return context* cannot be interrupted 
 (signal blocked), so it is safe to use these functions there
