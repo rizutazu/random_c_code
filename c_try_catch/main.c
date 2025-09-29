@@ -69,33 +69,30 @@ int main() {
         printf("booo ver2 %s\n", (char *)data);
     }) finally(0)
 
-    // try(3, {
-    //     try(2, {
-    //         try(1, {
-    //             throw(BadShitHappenedException0, "boommmmm");
-    //         }) catch(1, BadShitHappenedException0, data, {
-    //             printf("bad shit happened 0 %s\n", (char *)data);
-    //             printf("my lovely local %d\n", a);
-    //             throw(WhatHellException1, data + 1);
-    //         })
-    //         // catch(1, IDKException2, data, {
-    //         //     printf("what?\n");
-    //         // })
-    //         finally(1)
-    //     }) catch(2, WhatHellException1, data,{
-    //         printf("what hell 1 %s\n", (char *)data);
-    //         printf("my lovely local %d\n", a);
-    //         throw(IDKException2, data + 1);
-    //     }) finally(2)
-    // }) catch(3, IDKException2, data,{
-    //     printf("i don't know 2 %s\n", (char *)data);
-    //     printf("my lovely local %d\n", a);
-    // }) finally(3)
+    try(3, {
+        try(2, {
+            try(1, {
+                throw(BadShitHappenedException0, "boommmmm");
+            }) catch(1, BadShitHappenedException0, data, {
+                printf("bad shit happened 0 %s\n", (char *)data);
+                printf("my lovely local %d\n", a);
+                throw(WhatHellException1, data + 1);
+            })
+            catch(1, IDKException2, data, {
+                printf("what?\n");
+            })
+            finally(1)
+        }) catch(2, WhatHellException1, data,{
+            printf("what hell 1 %s\n", (char *)data);
+            printf("my lovely local %d\n", a);
+            throw(IDKException2, data + 1);
+        }) finally(2)
+    }) catch(3, IDKException2, data,{
+        printf("i don't know 2 %s\n", (char *)data);
+        printf("my lovely local %d\n", a);
+    }) finally(3)
 
     printf("main ret\n");
 
     return 0;
-}
-
-void ww() {
 }
