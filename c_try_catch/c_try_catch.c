@@ -11,9 +11,6 @@ typedef struct HandlerRegistry_t {
     // which type shall this catch block handle?
     ExceptionType_t type_identifier;
 
-    // entry point of this catch block
-    jmp_buf *env;
-
     // linked list
     struct HandlerRegistry_t *next;
 } HandlerRegistry_t;
@@ -28,10 +25,14 @@ typedef struct RegionRegistry_t {
     void *try_start;
     void *try_end;
 
-    // associated catch handlers, handlers must unique for each catch type
+    // associated registered catch handlers, handlers must unique for each catch type
     HandlerRegistry_t sentinel_handlers;
 
-    // if accessed properly by get_exception_data(), this field stores thrown exception data
+    // entry point of associated catch blocks
+    jmp_buf *env;
+
+    // if accessed properly by get_exception_data(), this two fields store thrown exception info
+    ExceptionType_t type;
     void *data;
 
     // linked list
@@ -86,15 +87,25 @@ static HandlerRegistry_t *allocateHandlerRegistry() {
     exit(1);
 }
 
+// allocate a zero-inited CleanFuncRegistry_t, exit on failure
+static CleanFuncRegistry_t *allocateCleanFuncRegistry() {
+    CleanFuncRegistry_t *c = calloc(sizeof(CleanFuncRegistry_t), 1);
+    if (c) {
+        return c;
+    }
+    fprintf(stderr, "allocate CleanFuncRegistry_t failed\n");
+    exit(1);
+}
+
 // free memory owned by a HandlerRegistry_t
 static void freeHandlerRegistry(HandlerRegistry_t *h) {
-    free(h->env);
     free(h);
 }
 
 // free memory owned by a RegionRegistry_t, including its associated HandlerRegistry_t
 static void freeRegionRegistry(RegionRegistry_t *t) {
     if (!t->sentinel_handlers.next) {
+        free(t->env);
         free(t);
         return;
     }
@@ -105,6 +116,14 @@ static void freeRegionRegistry(RegionRegistry_t *t) {
         freeHandlerRegistry(curr);
         curr = next;
     }
+
+    free(t->env);
+    free(t);
+}
+
+// free memory owned by a CleanFuncRegistry_t
+static void freeCleanFuncRegistry(CleanFuncRegistry_t *c) {
+    free(c);
 }
 
 // push a RegionRegistry_t to global list, newly pushed ones are always first elements
@@ -145,9 +164,12 @@ static RegionRegistry_t *searchRegionRegistryByIP(void *ip, RegionRegistry_t *he
         prev = header;
         curr = header->next;
     }
+   
+// #ifdef c_try_catch_debug
+//     printf("[search try registry for ip %p, prev_ptr=%p, remove=%d]\n", ip, header, remove);
+// #endif
 
     // find satisfied registry
-    // printf("[search try registry for ip %p]\n", ip);
     while (curr) {
         if (ip >= curr->try_start && ip < curr->try_end) {
             if (remove) {
@@ -183,8 +205,12 @@ static RegionRegistry_t *searchRegionRegistryByIdentifier(const void *region_ide
 // since the handler is unique for each type identifier, the return is unique
 // if remove is not zero, will dequeue found registry, if not NULL.
 static HandlerRegistry_t *searchHandlerRegistry(RegionRegistry_t *t, ExceptionType_t type_identifier, int remove) {
+    
+// #ifdef c_try_catch_debug
+//     printf("[search handler in %p for type %d, remove=%d]\n", t->region_identifier, type_identifier, remove);
+// #endif
+
     HandlerRegistry_t *curr = t->sentinel_handlers.next, *prev = &t->sentinel_handlers;
-    // printf("[search handler in %p for type %d]\n", t->region_identifier, type_identifier);
     while (curr) {
         if (curr->type_identifier == type_identifier) {
             if (remove) {
@@ -225,52 +251,66 @@ CleanFuncRegistry_t *searchCleanFuncRegistryByIPRange(const void *start_ip, cons
 
 // register a try region which has address range try_start ~ try_end, with given region_identifier
 // the region_identifier is defined and obtained in try macro, user shall not define it by themselves
-void register_try(void *region_identifier, void *try_start, void *try_end) {
-    RegionRegistry_t *r;
-
-    // check if registry with given region_identifier exists, if so do nothing
-    if ((r = searchRegionRegistryByIdentifier(region_identifier, 0))) {
-        // printf("[duplicate register try %p]\n", region_identifier);
-        return;
-    }
-
-    // allocate new one, fill fields and push into global list
-    r = allocateRegionRegistry();
-    r->region_identifier = region_identifier;
-    r->try_start = try_start;
-    r->try_end = try_end;
-    pushRegionRegistry(r);
-    // printf("[register try %p]\n", region_identifier);
-}
-
-// register a catch region which handles given type, it will be associated with the try region that has given
-// region_identifier
-// if the try region with region_identifier has already registered handler of given type, the new one will substitute it
-// exit on any kind of failure
-void register_catch(void *region_identifier, jmp_buf *env, ExceptionType_t type_identifier) {
+void register_try(void *region_identifier, void *try_start, void *try_end, jmp_buf *env) {
     // check memory allocation failure
     if (!env) {
         fprintf(stderr, "allocated catch env failed\n");
         exit(1);
     }
 
+    RegionRegistry_t *r;
+
+    // check if registry with given region_identifier exists, if so, update env and push it to the first 
+    if ((r = searchRegionRegistryByIdentifier(region_identifier, 1))) {
+
+#ifdef c_try_catch_debug
+        printf("[duplicate register try %p, remove old env]\n", region_identifier);
+#endif
+
+        free(r->env);
+        r->env = env;
+        pushRegionRegistry(r);
+        return;
+    }
+
+#ifdef c_try_catch_debug
+    printf("[register try %p: %p ~ %p]\n", region_identifier, try_start, try_end);
+#endif
+
+    // allocate new one, fill fields and push into global list
+    r = allocateRegionRegistry();
+    r->region_identifier = region_identifier;
+    r->try_start = try_start;
+    r->try_end = try_end;
+    r->env = env;
+    pushRegionRegistry(r);
+}
+
+// register a catch region which handles given type, it will be associated with the try region that has given
+// region_identifier
+// if the try region with region_identifier has already registered handler of given type, nothing is done
+void register_catch(void *region_identifier, ExceptionType_t type_identifier) {
     // search for associated try region
     RegionRegistry_t *t = searchRegionRegistryByIdentifier(region_identifier, 0);
     if (t) {
-        HandlerRegistry_t *c;
+        // check if duplicate, if so, do nothing
+        if (searchHandlerRegistry(t, type_identifier, 0)) {
 
-        // check if duplicate, if so, remove and free old one
-        if ((c = searchHandlerRegistry(t, type_identifier, 1))) {
-            // printf("[duplicate register catch type %d for %p, remove old one]\n", type_identifier, region_identifier);
-            freeHandlerRegistry(c);
+#ifdef c_try_catch_debug
+            printf("[duplicate register catch type %d for %p]\n", type_identifier, region_identifier);
+#endif
+
+            return;
         }
 
+#ifdef c_try_catch_debug
+        printf("[register catch type %d for %p]\n", type_identifier, region_identifier);
+#endif
+
         // allocate memory for new one && push list
-        c = allocateHandlerRegistry();
+        HandlerRegistry_t *c = allocateHandlerRegistry();
         c->type_identifier = type_identifier;
-        c->env = env;
         pushHandlerRegistry(t, c);
-        // printf("[register catch type %d for %p]\n", type_identifier, region_identifier);
         return;
     }
     // not found, error
@@ -290,14 +330,17 @@ void register_catch(void *region_identifier, jmp_buf *env, ExceptionType_t type_
 //     }
 // }
 
-// throw an exception to given type with associated data pointer
+// throw an exception to given type with data pointer
 // this function will unwind the stack:
 // 1. check if registered clean function exists, if so, do clean and unregister it.
-// 2. then, check if there is handler can handle it, if so, jump into it
-// if handler is not found, exit
-__attribute((noreturn))
+// 2. then, check if there is handler can handle it, if so, jump into its catch block
+// if handler is not found, the program will terminate
 void throw_exception(ExceptionType_t type_identifier, void *data) {
-    // printf("[throw type %d]\n", type_identifier);
+
+#ifdef c_try_catch_debug
+    printf("[throw type %d]\n", type_identifier);
+#endif
+
     unw_cursor_t cursor;
     unw_context_t uc;
 
@@ -305,22 +348,31 @@ void throw_exception(ExceptionType_t type_identifier, void *data) {
     unw_init_local(&cursor, &uc);
     
     RegionRegistry_t *r = NULL;
-    HandlerRegistry_t *h;
 
     // step the call frame
     while (unw_step(&cursor) > 0) {
+        unw_word_t ip;
+        unw_get_reg(&cursor, UNW_REG_IP, &ip);
 
-        // first, find and execute registered clean func
         unw_proc_info_t info;
         unw_get_proc_info(&cursor, &info);
         void *start_ip = (void *)info.start_ip;
         void *end_ip = (void *)info.end_ip;
+        
+#ifdef c_try_catch_debug
+        printf("[unwind frame of ip %p]\n", (void *)ip);
+#endif
 
+        // first, find and execute registered clean func
         // there might be multiple registries, so
         while (1) {
             CleanFuncRegistry_t *c = searchCleanFuncRegistryByIPRange(start_ip, end_ip, 1);
             if (c) {
-                // printf("[do clean for %p]\n", c->token);
+
+#ifdef c_try_catch_debug
+                printf("[do clean for %p]\n", c->identifier);
+#endif
+
                 c->func(c->arg);
                 free(c);
             } else {
@@ -328,21 +380,30 @@ void throw_exception(ExceptionType_t type_identifier, void *data) {
             }
         }
 
-        // then, get return address(in caller's region) of the frame, to determine if there is registered try block
-        unw_word_t ip;
-        unw_get_reg(&cursor, UNW_REG_IP, &ip);
-
+        // then, use return address of the frame to determine if it is in registered try block
         while (1) {
             // find satisfied try block, it might be nested, so we need to do multiple times
             // since newly registered try block is always push to the first, and the search starts from the first, this
             // guarantees inner try block is the first to be return
             if ((r = searchRegionRegistryByIP((void *)ip, r, 0)) != NULL) {
+
+#ifdef c_try_catch_debug
+                printf("[found registered try block %p]\n", r->region_identifier);
+#endif
+
                 // try block found, find catch block
-                if ((h = searchHandlerRegistry(r, type_identifier, 0)) != NULL) {
+                if (searchHandlerRegistry(r, type_identifier, 0)) {
+
+#ifdef c_try_catch_debug
+                    printf("[found type %d handler in %p]\n", type_identifier, r->region_identifier);
+                    printf("[set exception info in %p: type %d, data %p]\n", r->region_identifier, type_identifier, data);
+#endif
+
                     // catch block found, setup for catch block getting thrown data
+                    r->type = type_identifier;
                     r->data = data;
                     // jump into catch block, do not return
-                    longjmp(*h->env, 0);
+                    longjmp(*r->env, 0);
                 }
                 // satisfied catch block not found, search next satisfied try block
                 continue;
@@ -355,13 +416,21 @@ void throw_exception(ExceptionType_t type_identifier, void *data) {
     exit(1);
 }
 
-// get thrown exception data if in catch block, the result is unknown if not called properly
-void *get_exception_data(const void *region_identifier) {
+// get thrown exception info if in catch block, the result is unknown if not called properly
+void get_exception_info(const void *region_identifier, ExceptionType_t *type, void **data) {
     RegionRegistry_t *t = searchRegionRegistryByIdentifier(region_identifier, 0);
     if (t) {
-        return t->data;
+
+#ifdef c_try_catch_debug
+        printf("[read exception info in %p: type %d, data %p]\n", t->region_identifier, t->type, t->data);
+#endif
+
+        *type = t->type;
+        *data = t->data;
+        return;
     }
-    return NULL;
+    fprintf(stderr, "try to read info of unknown region_identifier %p\n", region_identifier);
+    exit(1);
 }
 
 // register a clean func, which will be called with given arg
@@ -369,11 +438,7 @@ void *get_exception_data(const void *region_identifier) {
 // clean func will be executed only once after exception occurred, then it will be unregistered
 // the return value is used as the identifier to unregister it
 void *register_clean_func(CleanFunc_t func, void *arg) {
-    CleanFuncRegistry_t *c = malloc(sizeof(CleanFuncRegistry_t));
-    if (!c) {
-        fprintf(stderr, "allocate CleanFuncRegistry_t failed\n");
-        exit(1);
-    }
+    CleanFuncRegistry_t *c = allocateCleanFuncRegistry();
     c->func = func;
     c->arg = arg;
     c->ip = __builtin_return_address(0);
@@ -390,7 +455,7 @@ void unregister_clean_func(const void *identifier) {
     while (curr) {
         if (curr->identifier == identifier) {
             prev->next = curr->next;
-            free(curr);
+            freeCleanFuncRegistry(curr);
             return;
         }
         prev = curr;
@@ -414,7 +479,7 @@ void cleanUpALL() {
     while (c) {
         CleanFuncRegistry_t *next = c->next;
         c->func(c->arg);
-        free(c);
+        freeCleanFuncRegistry(c);
         c = next;
     }
 }

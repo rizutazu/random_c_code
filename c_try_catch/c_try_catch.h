@@ -9,45 +9,48 @@ typedef int ExceptionType_t;
 
 typedef void (*CleanFunc_t) (void *);
 
-#define try(region_id_, try_block_)   \
+#define try(group_index, try_block)   \
 {   \
-    extern void register_try(void *region_identifier, void *try_start, void *try_end);    \
-    _region_identifier ## region_id_:    \
-    register_try(&&_region_identifier ## region_id_, &&_try_start ## region_id_, &&_try_end ## region_id_);    \
-    goto _catch_start ## region_id_; \
-    _try_start ## region_id_:    \
-    {   \
-        try_block_   \
+_region_identifier ## group_index:    \
+    jmp_buf *_env ## group_index = malloc(sizeof(jmp_buf));    \
+    extern void register_try(void *region_identifier, void *try_start, void *try_end, jmp_buf *env);    \
+    register_try(&&_region_identifier ## group_index, &&_try_start ## group_index, &&_try_end ## group_index, _env ## group_index);    \
+    goto _catch_init ## group_index; \
+_try_start ## group_index:    \
+    void _bf ## group_index() {   \
+        try_block   \
     }   \
-    _try_end ## region_id_:  \
-    goto _finally ## region_id_; \
-    _catch_start ## region_id_:  \
-}
+    _bf ## group_index();   \
+_try_end ## group_index:  \
+    goto _finally ## group_index; \
+_catch_init ## group_index:    \
+    int _stage_catch ## group_index = setjmp(*_env ## group_index);
 
-#define catch(region_id_, type_, data_, catch_block_) \
-{   \
-    extern void register_catch(void *region_identifier, jmp_buf *env, ExceptionType_t type_identifier);    \
-    extern void *get_exception_data(void *region_identifier);  \
-    jmp_buf *_env = malloc(sizeof(jmp_buf));    \
-    register_catch(&&_region_identifier ## region_id_, _env, type_);  \
-    if (setjmp(*_env)) {    \
-        void *data_ = get_exception_data(&&_region_identifier ## region_id_); \
-        {   \
-            catch_block_ \
+#define catch(group_index, type, data, catch_block) \
+    if (!_stage_catch ## group_index) {  \
+        extern void register_catch(void *region_identifier, ExceptionType_t type_identifier);   \
+        register_catch(&&_region_identifier ## group_index, type);  \
+    } else {    \
+        ExceptionType_t _t;  \
+        void *data; \
+        extern void get_exception_info(const void *region_identifier, ExceptionType_t *type_, void **data);  \
+        get_exception_info(&&_region_identifier ## group_index, &_t, &data); \
+        if (_t == type) {   \
+            {   \
+                catch_block \
+            }   \
+            goto _finally ## group_index;   \
         }   \
-        goto _finally ## region_id_; \
-    }   \
-}
+    }
 
-#define finally(region_id_)  \
-{   \
-    goto _try_start ## region_id_;   \
-    _finally ## region_id_:  \
-}
+#define finally(group_index)  \
+    goto _try_start ## group_index;   \
+_finally ## group_index:  \
+}   \
 
 #define throw(type_, data_)   \
 {   \
-    __attribute((noreturn)) extern void throw_exception(ExceptionType_t type_identifier, void *data);  \
+    extern void throw_exception(ExceptionType_t type_identifier, void *data);  \
     throw_exception(type_, data_); \
 }
 
