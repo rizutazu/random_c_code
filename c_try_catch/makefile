@@ -1,5 +1,5 @@
 CC := gcc
-OPTIMIZATION_LEVEL := 3
+OPTIMIZATION_LEVEL := 0
 CFLAGS := -lunwind -std=gnu11 -O$(OPTIMIZATION_LEVEL)
 DEBUG_FLAGS := -g -Dc_try_catch_debug
 LIB := c_try_catch.c

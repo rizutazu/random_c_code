@@ -35,5 +35,4 @@ int main() {
     }) catch(0, Exception2, data, {
         printf("catch 2 at main\n");
     }) finally(0)
-
 }

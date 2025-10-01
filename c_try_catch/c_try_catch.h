@@ -7,7 +7,12 @@
 // exception type identifier
 typedef int ExceptionType_t;
 
+// no exception happened
+#define ExceptionNone (-1)
+
 typedef void (*CleanFunc_t) (void *);
+
+#ifdef __OPTIMIZE__
 
 #define try(group_index, try_block)   \
 {   \
@@ -17,7 +22,7 @@ _region_identifier ## group_index:    \
     register_try(&&_region_identifier ## group_index, &&_try_start ## group_index, &&_try_end ## group_index, _env ## group_index);    \
     goto _catch_init ## group_index; \
 _try_start ## group_index:    \
-    void _bf ## group_index() {   \
+    void __attribute((noinline)) _bf ## group_index() {   \
         try_block   \
     }   \
     _bf ## group_index();   \
@@ -25,6 +30,27 @@ _try_end ## group_index:  \
     goto _finally ## group_index; \
 _catch_init ## group_index:    \
     int _stage_catch ## group_index = setjmp(*_env ## group_index);
+
+#else
+
+#define try(group_index, try_block)   \
+{   \
+_region_identifier ## group_index:    \
+    jmp_buf *_env ## group_index = malloc(sizeof(jmp_buf));    \
+    extern void register_try(void *region_identifier, void *try_start, void *try_end, jmp_buf *env);    \
+    register_try(&&_region_identifier ## group_index, &&_try_start ## group_index, &&_try_end ## group_index, _env ## group_index);    \
+    goto _catch_init ## group_index; \
+_try_start ## group_index:    \
+    {   \
+        try_block   \
+    }   \
+_try_end ## group_index:  \
+    goto _finally ## group_index;   \
+_catch_init ## group_index:    \
+    int _stage_catch ## group_index = setjmp(*_env ## group_index);
+
+#endif
+
 
 #define catch(group_index, type, data, catch_block) \
     if (!_stage_catch ## group_index) {  \

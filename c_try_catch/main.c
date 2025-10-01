@@ -43,6 +43,7 @@ void func1() {
     func2();
     printf("func 1 unregister clean %p\n", token);
     unregister_clean_func(token);
+    free(ptr);
 
     try(0, {
         throw(WhatHellException1, "llllll");
@@ -56,7 +57,6 @@ void func1() {
 
 int main() {
     int a = 114514;
-
     try(0, {
         void *ptr = malloc(114);
         printf("hi\n");
