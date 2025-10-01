@@ -1,9 +1,9 @@
 # c_try_catch: a simple sjij-based try/catch style exception handling implementation
 
 ## Features
-- throw exception with user-defined exception type, also do catch block
-- support nested try-catch block
-- register a clean-up function in case the exception interrupted your clean-up routine
+- Throw exception with user-defined exception type, also do catch block
+- Support nested try-catch block
+- Register a clean-up function in case the exception interrupted your clean-up routine
 
 ## Basic usage
 
@@ -96,7 +96,7 @@ void func2() {
 
 `throw(type, data)`
 - `type` is a variable of type `ExceptionType_t`, currently it is an alias of `int` 
-- you can define your own type by assigning different values, and catch different types in different catch blocks (see syntax below)
+- You can define your own type by assigning different values, and catch different types in different catch blocks (see syntax below)
 - `data` is a void pointer, you can pass some data to your catch block, notice that **do not use stack-based pointers** 
 
 ### `try` block syntax
@@ -125,7 +125,7 @@ void func1() {
     // you are going to call func2(), which might thow exception and interrupt your clean-up routine
     // the first argument is the clean-up function, and the second one is its argument when calling it
     // the return value can be used for unregistering it
-    void *identifier = register_clean_func(free, ptr)
+    void *identifier = register_clean_func(free, ptr);
     
     // might throw exception!
     // if exception happened, free(ptr) will be executed
