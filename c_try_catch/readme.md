@@ -1,5 +1,7 @@
 # c_try_catch: a simple sjij-based try/catch style exception handling implementation
 
+*Experimental implementation, a proof-of-concept*
+
 ## Features
 - Throw exception with user-defined exception type, also do catch block
 - Support nested try-catch block
@@ -27,7 +29,7 @@ You may find out number `0` is the first argument of all three kind of blocks, t
 integer** that used to bind `try`/`catch`/`finally` blocks together as a single unit, to support nested try-catch blocks.
 
 User can select their own "group index" number as they want. **Notice that different try-catch blocks in the same function 
-should have different "group index". Blocks of different functions are allowed, however.**
+should not have same "group index". Blocks of different functions are allowed, however.**
 
 Ok:
 ```c
@@ -124,6 +126,7 @@ void func1() {
     
     // you are going to call func2(), which might thow exception and interrupt your clean-up routine
     // the first argument is the clean-up function, and the second one is its argument when calling it
+    // notice: do not use stack-based pointers!
     // the return value can be used for unregistering it
     void *identifier = register_clean_func(free, ptr);
     
@@ -148,7 +151,9 @@ void func1() {
 
 - Compiler reliance: this implementation heavily relies on gcc's `labels as values` and `nested function` extension, other compilers might not work
 - No `return` statement in `try` block: as it is implemented over `nested function` 
-- No `goto` statement in `try` block: for reasons i don't know, the compiler keeps complaining it, even though labels are declared to be visible in `nested function`
+- No `goto` outside label statement in `try` block: 
+  - you can goto a label defined in current try block, 
+  - but you can't goto a label defined outside it: for reasons I don't know, the compiler keeps complaining about it for "undefined label", even though labels are declared to be visible in `nested function`
 - Your code analyzer might complain about lacking a `;`, because they do not treat `nested function` as valid syntax: 
   - `int func1() { int nested_func() {return 42;} }   <== 😱😱😱 Oh my god a syntax error!!!`
   - `int func1() { int nested_func(); {return 42;} }   <== 👍👍👍 Valid code, pass`
