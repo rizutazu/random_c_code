@@ -1,8 +1,6 @@
 #include "c_try_catch.h"
 #include <stdlib.h>
 #include <stdio.h>
-#define UNW_LOCAL_ONLY
-#include <libunwind.h>
 
 // --- data structure declarations ---
 
@@ -44,8 +42,8 @@ typedef struct CleanFuncRegistry_t {
     // for identifying this registry
     void *identifier;
 
-    // caller's return address, used to determine call frame
-    void *ip;
+    // caller's frame pointer, used to determine call frame
+    void *fp;
 
     // user specified clean func and its arg
     CleanFunc_t func;
@@ -140,20 +138,20 @@ static void pushHandlerRegistry(RegionRegistry_t *t, HandlerRegistry_t *c) {
     t->sentinel_handlers.next = c;
 }
 
-// search a RegionRegistry that its try block can cover given ip
+// search a RegionRegistry that its try block can cover given pc
 // header are used to specify starting point: for nested try block, there might be multiple regions satisfying it.
 // we use the staring point to make sure each region is searched/returned only once
 // if header is NULL, search from scratch
 // if remove is not zero, will dequeue found registry, if not NULL.
-static RegionRegistry_t *searchRegionRegistryByIP(void *ip, RegionRegistry_t *header, int remove) {
-    // ip might point to the NEXT instruction to execute, it might exceed try block if it is the last line of code:
+static RegionRegistry_t *searchRegionRegistryByPC(void *pc, RegionRegistry_t *header, int remove) {
+    // pc might point to the NEXT instruction to execute, it might exceed try block if it is the last line of code:
     // --- try start ---
     // ...
     // ...
     // throw(...)
     // --- try end ---
-    // nothing related to try       <-- ip points here
-    ip = ip - 1;
+    // nothing related to try       <-- pc points here
+    pc = pc - 1;
 
     // setup iteration starting point
     RegionRegistry_t *curr, *prev;
@@ -164,14 +162,10 @@ static RegionRegistry_t *searchRegionRegistryByIP(void *ip, RegionRegistry_t *he
         prev = header;
         curr = header->next;
     }
-   
-// #ifdef c_try_catch_debug
-//     printf("[search try registry for ip %p, prev_ptr=%p, remove=%d]\n", ip, header, remove);
-// #endif
 
     // find satisfied registry
     while (curr) {
-        if (ip >= curr->try_start && ip < curr->try_end) {
+        if (pc >= curr->try_start && pc < curr->try_end) {
             if (remove) {
                 prev->next = curr->next;
             }
@@ -205,11 +199,6 @@ static RegionRegistry_t *searchRegionRegistryByIdentifier(const void *region_ide
 // since the handler is unique for each type identifier, the return is unique
 // if remove is not zero, will dequeue found registry, if not NULL.
 static HandlerRegistry_t *searchHandlerRegistry(RegionRegistry_t *t, ExceptionType_t type_identifier, int remove) {
-    
-// #ifdef c_try_catch_debug
-//     printf("[search handler in %p for type %d, remove=%d]\n", t->region_identifier, type_identifier, remove);
-// #endif
-
     HandlerRegistry_t *curr = t->sentinel_handlers.next, *prev = &t->sentinel_handlers;
     while (curr) {
         if (curr->type_identifier == type_identifier) {
@@ -230,12 +219,12 @@ void pushCleanFuncRegistry(CleanFuncRegistry_t *c) {
     registered_clean.sentinel.next = c;
 }
 
-// search a CleanFuncRegistry, if its caller's ip lie in given start_ip ~ end_ip address range
+// search a CleanFuncRegistry, if its caller's fp matches given fp
 // note that multiple satisfied registries might exist, it is better to do while loop with remove=1 to get them all
-CleanFuncRegistry_t *searchCleanFuncRegistryByIPRange(const void *start_ip, const void *end_ip, int remove) {
+CleanFuncRegistry_t *searchCleanFuncRegistryByFP(const void *fp, int remove) {
     CleanFuncRegistry_t *curr = registered_clean.sentinel.next, *prev = &registered_clean.sentinel;
     while (curr) {
-        if (curr->ip >= start_ip && curr->ip < end_ip) {
+        if (curr->fp == fp) {
             if (remove) {
                 prev->next = curr->next;
             }
@@ -245,6 +234,44 @@ CleanFuncRegistry_t *searchCleanFuncRegistryByIPRange(const void *start_ip, cons
         curr = curr->next;
     }
     return NULL;
+}
+
+// ref: https://maskray.me/blog/2020-11-08-stack-unwinding
+// i hate handling multi-arch stuff so i give up this at the first time,
+// then i found that it seems like not possible to implement without handling it
+// input:
+// - fp: frame pointer [current func's fp]
+// output:
+// - next_fp: frame pointer of upper frame [caller's fp]
+// - pc: return address of the fp [address of returning to caller]
+void backtrace(void *fp, void **next_fp, void **pc) {
+
+    if (!fp) {
+        *next_fp = 0;
+        *pc = 0;
+
+#ifdef c_try_catch_debug
+        printf("[unwind: fp: %p => next_fp: %p, pc: %p]\n", 0, 0, 0);
+#endif
+        return;
+    }
+
+    void **_fp = fp;
+#if defined(__riscv) || defined(__loongarch__)
+    void **_next_fp = _fp[-2], *_pc = _fp[-1];
+#elif defined(__powerpc__)
+    void **_next_fp = _fp[0];
+    void *_pc = _next_fp <= _fp ? 0 : _next_fp[2];
+#else
+    void **_next_fp = *_fp, *_pc = _fp[1];
+#endif
+
+    *next_fp = _next_fp <= _fp ? 0 : _next_fp;
+    *pc = _pc;
+
+#ifdef c_try_catch_debug
+    printf("[unwind: fp: %p => next_fp: %p, pc: %p]\n", fp, _next_fp, _pc);
+#endif
 }
 
 // --- functions exposed(?) to user ---
@@ -318,18 +345,6 @@ void register_catch(void *region_identifier, ExceptionType_t type_identifier) {
     exit(1);
 }
 
-// void unregister_region(void *region_identifier) {
-//     RegionRegistry_t *r = searchRegionRegistryByIdentifier(region_identifier, 1);
-//
-//     if (r) {
-//         freeRegionRegistry(r);
-//         // printf("[unregister %p]\n", region_identifier);
-//     } else {
-//         fprintf(stderr, "unregister unknown region %p\n", region_identifier);
-//         exit(1);
-//     }
-// }
-
 // throw an exception to given type with data pointer
 // this function will unwind the stack:
 // 1. check if registered clean function exists, if so, do clean and unregister it.
@@ -341,36 +356,24 @@ void throw_exception(ExceptionType_t type_identifier, void *data) {
     printf("[throw type %d]\n", type_identifier);
 #endif
 
-    unw_cursor_t cursor;
-    unw_context_t uc;
-
-    unw_getcontext(&uc);
-    unw_init_local(&cursor, &uc);
+    void *current_fp = __builtin_frame_address(0), *next_fp, *pc;
     
     RegionRegistry_t *r = NULL;
 
-    // step the call frame
-    while (unw_step(&cursor) > 0) {
-        unw_word_t ip;
-        unw_get_reg(&cursor, UNW_REG_IP, &ip);
-
-        unw_proc_info_t info;
-        unw_get_proc_info(&cursor, &info);
-        void *start_ip = (void *)info.start_ip;
-        void *end_ip = (void *)info.end_ip;
-        
+    // the caller might have the same frame pointer with the current function
+    while (current_fp) {
 #ifdef c_try_catch_debug
-        printf("[unwind frame of ip %p]\n", (void *)ip);
+        printf("[unwind frame of fp %p]\n", current_fp);
 #endif
 
         // first, find and execute registered clean func
         // there might be multiple registries, so
         while (1) {
-            CleanFuncRegistry_t *c = searchCleanFuncRegistryByIPRange(start_ip, end_ip, 1);
+            CleanFuncRegistry_t *c = searchCleanFuncRegistryByFP(current_fp, 1);
             if (c) {
 
 #ifdef c_try_catch_debug
-                printf("[do clean for %p]\n", c->identifier);
+                printf("[do clean for fp %p, identifier %p]\n", c->fp, c->identifier);
 #endif
 
                 c->func(c->arg);
@@ -385,7 +388,7 @@ void throw_exception(ExceptionType_t type_identifier, void *data) {
             // find satisfied try block, it might be nested, so we need to do multiple times
             // since newly registered try block is always push to the first, and the search starts from the first, this
             // guarantees inner try block is the first to be return
-            if ((r = searchRegionRegistryByIP((void *)ip, r, 0)) != NULL) {
+            if ((r = searchRegionRegistryByPC(pc, r, 0)) != NULL) {
 
 #ifdef c_try_catch_debug
                 printf("[found registered try block %p]\n", r->region_identifier);
@@ -411,6 +414,9 @@ void throw_exception(ExceptionType_t type_identifier, void *data) {
             // no more satisfied try block in current frame
             break;
         }
+
+        backtrace(current_fp, &next_fp, &pc);
+        current_fp = next_fp;
     }
     fprintf(stderr, "Uncaught exception %d\n", type_identifier);
     exit(1);
@@ -441,9 +447,15 @@ void *register_clean_func(CleanFunc_t func, void *arg) {
     CleanFuncRegistry_t *c = allocateCleanFuncRegistry();
     c->func = func;
     c->arg = arg;
-    c->ip = __builtin_return_address(0);
+    // caller's frame
+    c->fp = __builtin_frame_address(1);
     c->identifier = c;
     pushCleanFuncRegistry(c);
+
+#ifdef c_try_catch_debug
+    printf("[register clean function for fp %p, identifier %p]\n", c->fp, c->identifier);
+#endif
+
     return c;
 }
 
@@ -455,6 +467,11 @@ void unregister_clean_func(const void *identifier) {
     while (curr) {
         if (curr->identifier == identifier) {
             prev->next = curr->next;
+
+#ifdef c_try_catch_debug
+            printf("[manually unregister clean function for fp %p, identifier %p]\n", curr->fp, curr->identifier);
+#endif
+
             freeCleanFuncRegistry(curr);
             return;
         }
@@ -477,6 +494,11 @@ void cleanUpALL() {
 
     CleanFuncRegistry_t *c = registered_clean.sentinel.next;
     while (c) {
+
+#ifdef c_try_catch_debug
+        printf("[clean up forgotten registry on exit for fp %p, identifier %p]\n", c->fp, c->identifier);
+#endif
+
         CleanFuncRegistry_t *next = c->next;
         c->func(c->arg);
         freeCleanFuncRegistry(c);

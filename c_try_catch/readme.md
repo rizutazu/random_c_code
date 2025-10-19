@@ -146,6 +146,11 @@ void func1() {
 
 - `main`: simple examples
 - `recursive`: exception handling in recursive function 
+- `uncaught_exit`: demonstrate uncaught exception with verbose logs
+
+## Important notice
+
+Some features are implemented by assuming all the functions have frame pointers. For gcc, e.g., you must add `-fno-omit-frame-pointer` flag
 
 ## Problems
 
@@ -155,5 +160,5 @@ void func1() {
   - you can goto a label defined in current try block, 
   - but you can't goto a label defined outside it: for reasons I don't know, the compiler keeps complaining about it for "undefined label", even though labels are declared to be visible in `nested function`
 - Your code analyzer might complain about lacking a `;`, because they do not treat `nested function` as valid syntax: 
-  - `int func1() { int nested_func() {return 42;} }   <== 😱😱😱 Oh my god a syntax error!!!`
-  - `int func1() { int nested_func(); {return 42;} }   <== 👍👍👍 Valid code, pass`
+  - `void func1() { void nested_func() {int a = 42; return;} }    <== 😱😱😱 Oh my god a syntax error!!!`
+  - `void func1() { void nested_func(); {int a = 42; return;} }   <== 👍👍👍 Valid code, pass`
