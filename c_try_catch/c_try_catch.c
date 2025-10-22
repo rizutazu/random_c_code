@@ -251,7 +251,7 @@ void backtrace(void *fp, void **next_fp, void **pc) {
         *pc = 0;
 
 #ifdef c_try_catch_debug
-        printf("[unwind: fp: %p => next_fp: %p, pc: %p]\n", 0, 0, 0);
+        printf("[backtrace: fp: %p => next_fp: %p, pc: %p]\n", 0, 0, 0);
 #endif
         return;
     }
@@ -270,7 +270,7 @@ void backtrace(void *fp, void **next_fp, void **pc) {
     *pc = _pc;
 
 #ifdef c_try_catch_debug
-    printf("[unwind: fp: %p => next_fp: %p, pc: %p]\n", fp, _next_fp, _pc);
+    printf("[backtrace: fp: %p => next_fp: %p, pc: %p]\n", fp, _next_fp, _pc);
 #endif
 }
 
@@ -356,7 +356,7 @@ void throw_exception(ExceptionType_t type_identifier, void *data) {
     printf("[throw type %d]\n", type_identifier);
 #endif
 
-    void *current_fp = __builtin_frame_address(0), *next_fp, *pc;
+    void *current_fp = __builtin_frame_address(0), *next_fp, *pc = NULL;
     
     RegionRegistry_t *r = NULL;
 
@@ -377,7 +377,7 @@ void throw_exception(ExceptionType_t type_identifier, void *data) {
 #endif
 
                 c->func(c->arg);
-                free(c);
+                freeCleanFuncRegistry(c);
             } else {
                 break;
             }
@@ -387,7 +387,7 @@ void throw_exception(ExceptionType_t type_identifier, void *data) {
         while (1) {
             // find satisfied try block, it might be nested, so we need to do multiple times
             // since newly registered try block is always push to the first, and the search starts from the first, this
-            // guarantees inner try block is the first to be return
+            // guarantees inner try block is the first to be returned
             if ((r = searchRegionRegistryByPC(pc, r, 0)) != NULL) {
 
 #ifdef c_try_catch_debug

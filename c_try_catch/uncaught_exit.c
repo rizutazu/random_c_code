@@ -11,22 +11,22 @@ void directly_exit(char *arg) {
 }
 
 void func3() {
-    register_clean_func(random_free, "func3");
+    register_clean_func((CleanFunc_t)random_free, "func3");
     throw(114, NULL);
 }
 
 void func2() {
-    register_clean_func(directly_exit, "func2");
+    register_clean_func((CleanFunc_t)directly_exit, "func2");
     func3();
 }
 
 void func1() {
-    register_clean_func(random_free, "func1");
+    register_clean_func((CleanFunc_t)random_free, "func1");
     func2();
 }
 
 int main() {
-    register_clean_func(random_free, "main");
+    register_clean_func((CleanFunc_t)random_free, "main");
     func1();
     printf("..\n");
 }
